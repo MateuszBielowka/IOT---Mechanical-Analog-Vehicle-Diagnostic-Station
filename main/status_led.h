@@ -2,7 +2,7 @@
 #define STATUS_LED_H
 
 /**
- * @brief Uruchamia zadanie (task) obsługujące diodę LED statusu.
+ * @brief Uruchamia zadanie obsługujące diodę LED.
  * * Dioda mruga inaczej w zależności od stanu połączenia Wi-Fi.
  */
 void status_led_start_task(void);
