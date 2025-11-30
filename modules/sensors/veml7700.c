@@ -145,8 +145,8 @@ void veml7700_task(void *arg)
         // This is the function you wanted
         if (veml7700_read_lux(&lux) == ESP_OK)
         {
-            ESP_LOGI(TAG, "Light Level: %.2f Lux", lux);
-            // TODO: save the light measurement
+            // ESP_LOGI(TAG, "Light Level: %.2f Lux", lux);
+            *(double *)arg = lux;
             vTaskDelay(pdMS_TO_TICKS(3600000));
         }
         else
@@ -157,7 +157,7 @@ void veml7700_task(void *arg)
     }
 }
 
-void veml7700_start_task()
+void veml7700_start_task(double *parameter)
 {
-    xTaskCreate(veml7700_task, "VEML7700_Task", 4096, NULL, 10, NULL);
+    xTaskCreate(veml7700_task, "VEML7700_Task", 4096, parameter, 10, NULL);
 }

@@ -38,6 +38,6 @@ float max6675_read_celsius(max6675_handle_t *handle);
 
 void max6675_task(void *arg);
 
-void max6675_start_task(void);
+void max6675_start_task(double *parameter);
 
 #endif // MAX6675_H

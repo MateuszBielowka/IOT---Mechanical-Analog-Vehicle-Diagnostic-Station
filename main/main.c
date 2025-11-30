@@ -137,11 +137,17 @@ void app_main(void)
   init_spi_global();
   vTaskDelay(pdMS_TO_TICKS(500));
 
-  bmp280_start_task();
-  veml7700_start_task();
-  max6675_start_task();
+  double bmp280_parameter = 0.0;
+  double veml7700_parameters = 0.0;
+  double max6675_parameters = 0.0;
+  double adxl345_parameters = 0.0;
+  double hcsr04_parameters = 0.0;
+
+  bmp280_start_task(&bmp280_parameter);
+  veml7700_start_task(&veml7700_parameters);
+  max6675_start_task(&max6675_parameters);
   adxl345_start_task();
-  hcsr04_start_task();
+  hcsr04_start_task(&hcsr04_parameters);
 
   // 1. Inicjalizacja NVS (Systemowa)
   esp_err_t ret = nvs_flash_init();
@@ -205,6 +211,30 @@ void app_main(void)
     {
       storage_clear_all();
       printf(">> Wyczyszczono.\n");
+    }
+    else if (strcmp(input_line, "measurement") == 0)
+    {
+
+      bool valid = true;
+
+      // bmp280_single_measurement(&temperature, &pressure);
+
+      if (valid)
+      {
+        char line[128];
+        snprintf(line, sizeof(line), "BMP280 Ostatni pomiar: %.2f C\nVEML7700 Ostatni pomiar: %.2f Lux\nMAX6675 Ostatni pomiar: %.2f C\nHC-SR04 Ostatni pomiar: %.2f cm\n",
+                 bmp280_parameter, veml7700_parameters, max6675_parameters, hcsr04_parameters);
+        printf("BMP280 Ostatni pomiar: %.2f C \n\nVEML7700 Ostatni pomiar: %.2f Lux\nMAX6675 Ostatni pomiar: %.2f C\nHC-SR04 Ostatni pomiar: %.2f cm\n",
+               bmp280_parameter, veml7700_parameters, max6675_parameters, hcsr04_parameters);
+        if (storage_write_line(line))
+        {
+          printf(">> Zapisano.\n");
+        }
+      }
+      else
+      {
+        printf("Brak poprawnego pomiaru (czujnik jeszcze nie wykonał odczytu)\n");
+      }
     }
     else
     {

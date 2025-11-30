@@ -89,14 +89,15 @@ void max6675_task(void *arg)
         }
         else
         {
-            ESP_LOGI(TAG, "Temperature: %.2f C", temp);
+            // ESP_LOGI(TAG, "Temperature: %.2f C", temp);
+            *(double *)arg = temp;
             // TODO: save the temaperature measurement
             vTaskDelay(pdMS_TO_TICKS(3600000));
         }
     }
 }
 
-void max6675_start_task(void)
+void max6675_start_task(double *parameter)
 {
-    xTaskCreate(max6675_task, "max6675_task", 4096, NULL, 5, NULL);
+    xTaskCreate(max6675_task, "max6675_task", 4096, parameter, 5, NULL);
 }

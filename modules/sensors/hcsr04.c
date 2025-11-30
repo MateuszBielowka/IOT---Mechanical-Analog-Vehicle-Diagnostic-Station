@@ -21,7 +21,8 @@ void hcsr04_task(void *pvParameters)
         UltrasonicAssert(return_value);
         if (return_value == ESP_OK)
         {
-            ESP_LOGI(TAG, "Distance: %ldcm", afstand);
+            // ESP_LOGI(TAG, "Distance: %ldcm", afstand);
+            *(double *)pvParameters = (double)afstand;
         }
 
         // 0,5 second delay before starting new measurement
@@ -29,8 +30,8 @@ void hcsr04_task(void *pvParameters)
     }
 }
 
-void hcsr04_start_task(void)
+void hcsr04_start_task(double *parameter)
 {
     // Create measurement task
-    xTaskCreate(hcsr04_task, "HSRC04 task", 2048, NULL, 4, NULL);
+    xTaskCreate(hcsr04_task, "HSRC04 task", 2048, parameter, 4, NULL);
 }
