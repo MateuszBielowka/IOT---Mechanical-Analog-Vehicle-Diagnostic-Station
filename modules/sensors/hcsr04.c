@@ -2,7 +2,10 @@
 #include <stdio.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "esp_log.h"
 #include "hcsr04_driver.h"
+
+static const char *TAG = "HCSR04";
 
 void hcsr04_task(void *pvParameters)
 {
@@ -18,7 +21,7 @@ void hcsr04_task(void *pvParameters)
         UltrasonicAssert(return_value);
         if (return_value == ESP_OK)
         {
-            printf("Distance: %ldcm \n", afstand);
+            ESP_LOGI(TAG, "Distance: %ldcm", afstand);
         }
 
         // 0,5 second delay before starting new measurement

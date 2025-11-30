@@ -72,11 +72,11 @@ void max6675_task(void *arg)
 
     if (max6675_init(&config, &sensor) != ESP_OK)
     {
-        printf("MAX6675 Init Failed! Deleting Task.\n");
+        ESP_LOGE(TAG, "Init Failed! Deleting Task.");
         vTaskDelete(NULL);
     }
 
-    printf("MAX6675 Initialized. Reading...\n");
+    ESP_LOGI(TAG, "Initialized. Reading...");
 
     while (1)
     {
@@ -84,14 +84,15 @@ void max6675_task(void *arg)
 
         if (temp < 0)
         {
-            printf("Error: Thermocouple open or disconnected\n");
+            ESP_LOGE(TAG, "Error: Thermocouple open or disconnected");
+            vTaskDelay(pdMS_TO_TICKS(1000));
         }
         else
         {
-            printf("Temperature: %.2f C\n", temp);
+            ESP_LOGI(TAG, "Temperature: %.2f C", temp);
+            // TODO: save the temaperature measurement
+            vTaskDelay(pdMS_TO_TICKS(3600000));
         }
-
-        vTaskDelay(pdMS_TO_TICKS(1000));
     }
 }
 

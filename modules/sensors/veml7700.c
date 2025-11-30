@@ -7,7 +7,7 @@
 static const char *TAG = "VEML7700";
 
 /* I2C Settings */
-#define I2C_PORT I2C_NUM_0
+#define I2C_PORT I2C_NUM_1
 #define I2C_FREQ_HZ 100000
 #define VEML7700_ADDR 0x10 // Fixed I2C address for VEML7700
 
@@ -130,11 +130,11 @@ void veml7700_task(void *arg)
     // 1. Initialize sensor
     if (veml7700_init(25, 26) == ESP_OK)
     {
-        printf("Sensor Init Success!\n");
+        ESP_LOGI(TAG, "Sensor Init Success!");
     }
     else
     {
-        printf("Sensor Init Failed!\n");
+        ESP_LOGE(TAG, "Sensor Init Failed!");
     }
 
     // 2. Loop to take measurements
@@ -145,15 +145,15 @@ void veml7700_task(void *arg)
         // This is the function you wanted
         if (veml7700_read_lux(&lux) == ESP_OK)
         {
-            ESP_LOGI("MAIN", "Light Level: %.2f Lux", lux);
+            ESP_LOGI(TAG, "Light Level: %.2f Lux", lux);
+            // TODO: save the light measurement
+            vTaskDelay(pdMS_TO_TICKS(3600000));
         }
         else
         {
-            ESP_LOGE("MAIN", "Failed to read sensor");
+            ESP_LOGE(TAG, "Failed to read sensor");
+            vTaskDelay(pdMS_TO_TICKS(1000));
         }
-
-        // Wait 1 hour
-        vTaskDelay(pdMS_TO_TICKS(3600000));
     }
 }
 

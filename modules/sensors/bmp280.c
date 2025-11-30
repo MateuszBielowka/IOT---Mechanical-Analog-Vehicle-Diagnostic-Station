@@ -9,7 +9,7 @@ static const char *TAG = "BMP280";
 /* Configuration */
 #define I2C_MASTER_NUM I2C_NUM_0
 #define I2C_MASTER_FREQ_HZ 100000
-#define BMP280_ADDR 0x76 // Change to 0x77 if 0x76 doesn't work!
+#define BMP280_ADDR 0x77 // Change to 0x77 if 0x76 doesn't work!
 
 /* Registers */
 #define REG_DIG_T1 0x88
@@ -136,11 +136,11 @@ void bmp280_task(void *arg)
 
     if (bmp280_setup(21, 22) == ESP_OK)
     {
-        printf("BMP280 init success!\n");
+        ESP_LOGI(TAG, "init success!");
     }
     else
     {
-        printf("BMP280 init failed. Check wiring or I2C address.\n");
+        ESP_LOGE(TAG, "init failed. Check wiring or I2C address.");
     }
     while (1)
     {
