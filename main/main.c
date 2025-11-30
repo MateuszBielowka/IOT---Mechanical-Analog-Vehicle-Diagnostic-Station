@@ -40,6 +40,7 @@
 // MOSI is not needed for MAX6675, but SPI driver might need a pin number or -1
 #define PIN_MOSI -1
 
+// stałe do zastąpienia funkcjami i zmiennymi
 #define BLE_PAIRED_SUCCESS true
 #define MEMORY_USAGE_PERCENT 75
 #define WIFI_STATION_CHECK_CREDETIALS true
@@ -133,6 +134,11 @@ void get_line_from_console(char *buffer, size_t max_len)
 
 void app_main(void)
 {
+  //----Test HC-SR04----
+  // hcsr04_start_task();
+  //--------------------
+  float temperature = 0.0f, pressure = 0.0f;
+
   init_i2c_global();
   init_spi_global();
   vTaskDelay(pdMS_TO_TICKS(500));
@@ -172,7 +178,7 @@ void app_main(void)
   ESP_LOGI(TAG, "Start aplikacji...");
 
   //----Test HC-SR04----
-  // hcsr04_regular_measurments();
+  // hcsr04_regular_measurements();
   //--------------------
   // xTaskCreate(bmp280_task, "BMP280_Task", 4096, NULL, 10, NULL);
 

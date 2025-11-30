@@ -82,7 +82,7 @@ void adxl345_task(void *arg)
         {
             // Display data on Monitor
             // Note: These are raw values. For G-force, multiply by 0.0039 (approx 4mg/LSB)
-            ESP_LOGI(TAG, "X: %d | Y: %d | Z: %d", acc_data.x, acc_data.y, acc_data.z);
+            // ESP_LOGI(TAG, "X: %d | Y: %d | Z: %d", acc_data.x, acc_data.y, acc_data.z);
         }
 
         // Wait for 500ms before next read
