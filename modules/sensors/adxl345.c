@@ -13,6 +13,7 @@
 #define REG_DATA_FORMAT 0x31 // Data Format Register
 #define REG_DATAX0 0x32      // Start of Data Registers (X-Low)
 
+#define ADXL345_LSB_TO_MS2 (0.004f * 9.80665f) // Conversion factor from LSB to m/s² (assuming ±2g range)
 static const char *TAG = "ADXL345";
 
 esp_err_t adxl345_init(void)
@@ -54,9 +55,12 @@ esp_err_t adxl345_read_data(adxl345_data_t *data)
     {
         // Combine low and high bytes into 16-bit signed integers
         // ADXL345 sends Least Significant Byte first
-        data->x = (int16_t)((raw_data[1] << 8) | raw_data[0]);
-        data->y = (int16_t)((raw_data[3] << 8) | raw_data[2]);
-        data->z = (int16_t)((raw_data[5] << 8) | raw_data[4]);
+        int16_t raw_x = (int16_t)((raw_data[1] << 8) | raw_data[0]);
+        int16_t raw_y = (int16_t)((raw_data[3] << 8) | raw_data[2]);
+        int16_t raw_z = (int16_t)((raw_data[5] << 8) | raw_data[4]);
+        data->x = raw_x * ADXL345_LSB_TO_MS2;
+        data->y = raw_y * ADXL345_LSB_TO_MS2;
+        data->z = raw_z * ADXL345_LSB_TO_MS2;
     }
     else
     {
@@ -68,6 +72,7 @@ esp_err_t adxl345_read_data(adxl345_data_t *data)
 
 void adxl345_task(void *arg)
 {
+    float combined_acceleration = 0.0f;
     if (adxl345_init() != ESP_OK)
     {
         ESP_LOGE(TAG, "Sensor init failed! Restarting...");
@@ -80,9 +85,8 @@ void adxl345_task(void *arg)
         // Read data from sensor
         if (adxl345_read_data(&acc_data) == ESP_OK)
         {
-            // Display data on Monitor
-            // Note: These are raw values. For G-force, multiply by 0.0039 (approx 4mg/LSB)
-            ESP_LOGI(TAG, "X: %d | Y: %d | Z: %d", acc_data.x, acc_data.y, acc_data.z);
+            ESP_LOGI(TAG, "X: %.3f m/s² | Y: %.3f m/s² | Z: %.3f m/s²",
+                     acc_data.x, acc_data.y, acc_data.z);
         }
 
         // Wait for 500ms before next read
