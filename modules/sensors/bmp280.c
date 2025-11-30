@@ -57,27 +57,6 @@ static void parse_calibration_data(uint8_t *reg_data)
 
 esp_err_t bmp280_setup(int sda_pin, int scl_pin)
 {
-    // 1. Initialize I2C Bus
-    i2c_config_t conf = {
-        .mode = I2C_MODE_MASTER,
-        .sda_io_num = sda_pin,
-        .scl_io_num = scl_pin,
-        .sda_pullup_en = GPIO_PULLUP_ENABLE,
-        .scl_pullup_en = GPIO_PULLUP_ENABLE,
-        .master.clk_speed = I2C_MASTER_FREQ_HZ,
-    };
-
-    // Check if driver is already installed to avoid crashing in multi-sensor projects
-    if (i2c_driver_install(I2C_MASTER_NUM, conf.mode, 0, 0, 0) != ESP_OK)
-    {
-        i2c_param_config(I2C_MASTER_NUM, &conf);
-        i2c_driver_install(I2C_MASTER_NUM, conf.mode, 0, 0, 0);
-    }
-    else
-    {
-        // Re-apply config if it was already installed
-        i2c_param_config(I2C_MASTER_NUM, &conf);
-    }
 
     // 2. Check Device ID
     uint8_t id = 0;
@@ -153,27 +132,33 @@ esp_err_t take_measurement(float *temperature, float *pressure)
 
 void bmp280_task(void *arg)
 {
+    vTaskDelay(pdMS_TO_TICKS(100));
 
     if (bmp280_setup(21, 22) == ESP_OK)
     {
         printf("BMP280 init success!\n");
-        while (1)
-        {
-            float temperature = 0.0f, pressure = 0.0f;
-
-            if (take_measurement(&temperature, &pressure) == ESP_OK)
-            {
-                ESP_LOGI(TAG, "Temp: %.2f C | Pres: %.2f Pa", temperature, pressure);
-            }
-            else
-            {
-                ESP_LOGE(TAG, "Measurement failed");
-            }
-            vTaskDelay(pdMS_TO_TICKS(2000));
-        }
     }
     else
     {
         printf("BMP280 init failed. Check wiring or I2C address.\n");
     }
+    while (1)
+    {
+        float temperature = 0.0f, pressure = 0.0f;
+
+        if (take_measurement(&temperature, &pressure) == ESP_OK)
+        {
+            ESP_LOGI(TAG, "Temp: %.2f C | Pres: %.2f Pa", temperature, pressure);
+        }
+        else
+        {
+            ESP_LOGE(TAG, "Measurement failed");
+        }
+        vTaskDelay(pdMS_TO_TICKS(2000));
+    }
+}
+
+void bmp280_start_task()
+{
+    xTaskCreate(bmp280_task, "BMP280_Task", 4096, NULL, 10, NULL);
 }

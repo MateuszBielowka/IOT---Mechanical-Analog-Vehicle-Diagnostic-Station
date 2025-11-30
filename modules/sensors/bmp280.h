@@ -27,7 +27,11 @@ extern "C"
      */
     esp_err_t take_measurement(float *temperature, float *pressure);
 
+    void init_i2c_bus(void);
+
     void bmp280_task(void *arg);
+
+    void bmp280_start_task(void);
 
 #ifdef __cplusplus
 }
