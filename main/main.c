@@ -5,8 +5,13 @@
 #include "wifi_station.h"
 #include "status_led.h"
 #include "http_client.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+#include <stdio.h>
+#include <string.h>
 
 #include "hcsr04.h"
+#include "storage_manager.h"
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -22,69 +27,86 @@ static const char *TAG = "app_main";
 #define WIFI_CONNECTED_SUCCESS true
 
 
-void app_main(void)
-{
-  //Init storage test if all sensors work
-  esp_err_t ret = nvs_flash_init(); // inicjalizacja NVS
-  // sprawdzanie czy NVS jest pelny lub ma niekompatybilna wersje
-  if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND)
-  {
-    ESP_ERROR_CHECK(nvs_flash_erase());
-    ret = nvs_flash_init();
-  }
-  ESP_ERROR_CHECK(ret);
-  ESP_LOGI(TAG, "Start aplikacji...");
 
-  status_led_start_task(); // watek obslugujacy diode LED
-
-
-  //Try BLE Pairing
-
-
-  if (BLE_PAIRED_SUCCESS == true)
-  {
-    ESP_LOGI(TAG, "BLE Paired Success");
-    if (MEMORY_USAGE_PERCENT < 90) {
-      ESP_LOGI(TAG, "Memory Usage is acceptable: %d%%", MEMORY_USAGE_PERCENT);
+// Funkcja pomocnicza do konsoli (zostaje tutaj, bo to UI)
+void get_line_from_console(char* buffer, size_t max_len) {
+    size_t index = 0;
+    int c;
+    while (1) {
+        c = fgetc(stdin);
+        if (c == EOF) {
+            vTaskDelay(10 / portTICK_PERIOD_MS);
+            continue;
+        }
+        if (c == '\n' || c == '\r') {
+            if (index > 0) {
+                buffer[index] = 0;
+                printf("\n");
+                return;
+            }
+        } else {
+            if (index < max_len - 1) {
+                buffer[index++] = (char)c;
+                printf("%c", c);
+            }
+        }
     }
-    else {
-      ESP_LOGW(TAG, "Memory Usage is too high: %d%%", MEMORY_USAGE_PERCENT);
-      //Check WIFI Credentials
-      if(WIFI_STATION_CHECK_CREDETIALS == false) {
-        ESP_LOGE(TAG, "Wi-Fi credentials are invalid. Please reconfigure via BLE.");
-        //Send BLE Alert about high memory usage
-        //Wait for new credentials via BLE
-      }
-      //Attempt to connect with credetials
+}
 
-      if(WIFI_CONNECTED_SUCCESS == true) {
-        ESP_LOGI(TAG, "Wi-Fi connected successfully.");
-      }
-      else {
-        ESP_LOGE(TAG, "Wi-Fi connection failed. Please reconfigure via BLE.");
-        //Send BLE Alert about high memory usage
-        //Wait for new credentials via BLE
-      }
-      
+void app_main(void) {
+    // 1. Inicjalizacja NVS (Systemowa)
+    esp_err_t ret = nvs_flash_init();
+    if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
+        ESP_ERROR_CHECK(nvs_flash_erase());
+        ret = nvs_flash_init();
     }
-  }
-  else
-  {
-    ESP_LOGI(TAG, "BLE Paired Failed");
-  }
+    
+    // 2. Inicjalizacja naszego modułu STORAGE
+    storage_init();
+    
+    // --- CZYSZCZENIE BUFORA WEJŚCIOWEGO NA STARCIE ---
+    int c;
+    while ((c = fgetc(stdin)) != EOF) {
+        // Po prostu ignorujemy znaki, które przyszły przed startem pętli
+        vTaskDelay(10 / portTICK_PERIOD_MS); 
+    }
 
-  
-  
-  //----Test HC-SR04----
-  // hcsr04_regular_measurments();
-  //--------------------
-  //----Test BMP280----
-  xTaskCreate(bmp280_task, "BMP280_Task", 4096, NULL, 10, NULL);
+    printf("\n\n===================================\n");
+    printf(" SYSTEM GOTOWY (Modularny)\n");
+    printf(" 1. [tekst] -> Zapisz\n");
+    printf(" 2. 'read'  -> Odczytaj\n");
+    printf(" 3. 'free'  -> Info o pamięci\n");
+    printf(" 4. 'clear' -> Wyczyść\n");
+    printf("===================================\n");
 
+    char input_line[128];
 
-  wifi_station_init();     // watek obslugujacy wi-fi
+    while (1) {
+        get_line_from_console(input_line, sizeof(input_line));
 
-  ESP_LOGI(TAG, "Pierwsze połączenie Wi-Fi nawiązane. Uruchamiam klienta HTTP...");
-
-  http_client_start_task(); // watek klienta HTTP
+        if (strcmp(input_line, "read") == 0) {
+            // Używamy funkcji z modułu
+            char* content = storage_read_all();
+            if (content) {
+                printf("\n--- NOTATKI ---\n%s\n---------------\n", content);
+                free(content);
+            } else {
+                printf(">> Pusto.\n");
+            }
+        } 
+        else if (strcmp(input_line, "free") == 0) {
+            printf(">> Wolne: %zu bajtów\n", storage_get_free_space());
+        }
+        else if (strcmp(input_line, "clear") == 0) {
+            storage_clear_all();
+            printf(">> Wyczyszczono.\n");
+        } 
+        else {
+            if (storage_write_line(input_line)) {
+                printf(">> Zapisano.\n");
+            } else {
+                printf(">> Błąd zapisu/brak miejsca!\n");
+            }
+        }
+    }
 }
