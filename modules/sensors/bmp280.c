@@ -136,11 +136,11 @@ void bmp280_task(void *arg)
 
     if (bmp280_setup(21, 22) == ESP_OK)
     {
-        printf("BMP280 init success!\n");
+        ESP_LOGI(TAG, "init success!");
     }
     else
     {
-        printf("BMP280 init failed. Check wiring or I2C address.\n");
+        ESP_LOGE(TAG, "init failed. Check wiring or I2C address.");
     }
     while (1)
     {

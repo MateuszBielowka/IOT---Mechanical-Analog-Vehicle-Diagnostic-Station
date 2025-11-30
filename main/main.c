@@ -24,10 +24,17 @@
 #include "driver/gpio.h"       // Required for GPIO_PULLUP_ENABLE
 #include "driver/spi_master.h" // <--- Add this include at the top
 
+// i2c bmp280 + adxl345
 #define I2C_MASTER_NUM I2C_NUM_0
-#define SDA_PIN 21
-#define SCL_PIN 22
+#define PORT_0_SDA_PIN 21
+#define PORT_0_SCL_PIN 22
 
+// i2c veml7700
+#define I2C_MASTER_NUM I2C_NUM_1
+#define PORT_1_SDA_PIN 25
+#define PORT_1_SCL_PIN 26
+
+// spi
 #define PIN_CLK 14
 #define PIN_SO 12 // MISO
 // MOSI is not needed for MAX6675, but SPI driver might need a pin number or -1
@@ -43,18 +50,32 @@ static const char *TAG = "app_main";
 
 void init_i2c_global(void)
 {
-  i2c_config_t conf = {
+  i2c_config_t conf0 = {
       .mode = I2C_MODE_MASTER,
-      .sda_io_num = SDA_PIN,
-      .scl_io_num = SCL_PIN,
+      .sda_io_num = PORT_0_SDA_PIN,
+      .scl_io_num = PORT_0_SCL_PIN,
       .sda_pullup_en = GPIO_PULLUP_ENABLE,
       .scl_pullup_en = GPIO_PULLUP_ENABLE,
       .master.clk_speed = 100000,
   };
   // Install the driver ONCE.
   // If this errors, nothing else will work.
-  ESP_ERROR_CHECK(i2c_param_config(I2C_MASTER_NUM, &conf));
-  ESP_ERROR_CHECK(i2c_driver_install(I2C_MASTER_NUM, conf.mode, 0, 0, 0));
+  ESP_ERROR_CHECK(i2c_param_config(I2C_NUM_0, &conf0));
+  ESP_ERROR_CHECK(i2c_driver_install(I2C_NUM_0, conf0.mode, 0, 0, 0));
+  printf(">>> I2C Driver Installed Globally <<<\n");
+
+  i2c_config_t conf1 = {
+      .mode = I2C_MODE_MASTER,
+      .sda_io_num = PORT_1_SDA_PIN,
+      .scl_io_num = PORT_1_SCL_PIN,
+      .sda_pullup_en = GPIO_PULLUP_ENABLE,
+      .scl_pullup_en = GPIO_PULLUP_ENABLE,
+      .master.clk_speed = 100000,
+  };
+  // Install the driver ONCE.
+  // If this errors, nothing else will work.
+  ESP_ERROR_CHECK(i2c_param_config(I2C_NUM_1, &conf1));
+  ESP_ERROR_CHECK(i2c_driver_install(I2C_NUM_1, conf1.mode, 0, 0, 0));
   printf(">>> I2C Driver Installed Globally <<<\n");
 }
 
@@ -112,10 +133,6 @@ void get_line_from_console(char *buffer, size_t max_len)
 
 void app_main(void)
 {
-  //----Test HC-SR04----
-  // hcsr04_start_task();
-  //--------------------
-
   init_i2c_global();
   init_spi_global();
   vTaskDelay(pdMS_TO_TICKS(500));
@@ -124,7 +141,7 @@ void app_main(void)
   veml7700_start_task();
   max6675_start_task();
   adxl345_start_task();
-  // stałe do zastąpienia funkcjami i zmiennymi
+  hcsr04_start_task();
 
   // 1. Inicjalizacja NVS (Systemowa)
   esp_err_t ret = nvs_flash_init();

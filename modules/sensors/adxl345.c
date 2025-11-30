@@ -3,9 +3,9 @@
 #include "esp_log.h"
 
 // I2C Configuration
-#define I2C_MASTER_NUM 0   // I2C Port Number
-#define I2C_SCL_IO 19      // ESP32 GPIO for SCL
-#define I2C_SDA_IO 18      // ESP32 GPIO for SDA
+#define I2C_MASTER_NUM I2C_NUM_0
+#define I2C_SCL_IO 22      // ESP32 GPIO for SCL
+#define I2C_SDA_IO 21      // ESP32 GPIO for SDA
 #define I2C_FREQ_HZ 100000 // I2C Speed (100kHz)
 
 // ADXL345 Registers
@@ -70,7 +70,7 @@ void adxl345_task(void *arg)
 {
     if (adxl345_init() != ESP_OK)
     {
-        printf("Sensor init failed! Restarting...\n");
+        ESP_LOGE(TAG, "Sensor init failed! Restarting...");
     }
 
     adxl345_data_t acc_data;
@@ -82,7 +82,7 @@ void adxl345_task(void *arg)
         {
             // Display data on Monitor
             // Note: These are raw values. For G-force, multiply by 0.0039 (approx 4mg/LSB)
-            printf("X: %d | Y: %d | Z: %d\n", acc_data.x, acc_data.y, acc_data.z);
+            ESP_LOGI(TAG, "X: %d | Y: %d | Z: %d", acc_data.x, acc_data.y, acc_data.z);
         }
 
         // Wait for 500ms before next read
