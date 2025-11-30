@@ -5,7 +5,7 @@
 
 void hcsr04_task(void *pvParameters);
 
-void hcsr04_regular_measurments(void);
+void hcsr04_create_task(void);
 
 
 #endif // HCSR04

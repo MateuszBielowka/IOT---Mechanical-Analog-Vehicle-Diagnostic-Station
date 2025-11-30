@@ -27,7 +27,7 @@ void hcsr04_task(void *pvParameters)
     } 
 }
 
-void hcsr04_regular_measurments(void)
+void hcsr04_create_task(void)
 {
     // Create measurement task
     xTaskCreate(hcsr04_task, "HSRC04 task", 2048, NULL, 4, NULL);
