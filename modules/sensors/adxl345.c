@@ -85,8 +85,9 @@ void adxl345_task(void *arg)
         // Read data from sensor
         if (adxl345_read_data(&acc_data) == ESP_OK)
         {
-            ESP_LOGI(TAG, "X: %.3f m/s² | Y: %.3f m/s² | Z: %.3f m/s²",
-                     acc_data.x, acc_data.y, acc_data.z);
+            // Display data on Monitor
+            // Note: These are raw values. For G-force, multiply by 0.0039 (approx 4mg/LSB)
+            // ESP_LOGI(TAG, "X: %d | Y: %d | Z: %d", acc_data.x, acc_data.y, acc_data.z);
         }
 
         // Wait for 500ms before next read

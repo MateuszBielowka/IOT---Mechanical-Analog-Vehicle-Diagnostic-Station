@@ -132,6 +132,7 @@ esp_err_t take_measurement(float *temperature, float *pressure)
 
 void bmp280_task(void *arg)
 {
+    printf("BMP280 Task Started with parameter: %f\n", *(double *)arg);
     vTaskDelay(pdMS_TO_TICKS(100));
 
     if (bmp280_setup(21, 22) == ESP_OK)
@@ -148,7 +149,8 @@ void bmp280_task(void *arg)
 
         if (take_measurement(&temperature, &pressure) == ESP_OK)
         {
-            ESP_LOGI(TAG, "Temp: %.2f C | Pres: %.2f Pa", temperature, pressure);
+            // ESP_LOGI(TAG, "Temp: %.2f C | Pres: %.2f Pa", temperature, pressure);
+            *(double *)arg = temperature; // just to use the parameter
         }
         else
         {
@@ -158,36 +160,8 @@ void bmp280_task(void *arg)
     }
 }
 
-
-
-void bmp280_single_measurement(float *temperature, float *pressure)
+void bmp280_start_task(double *parameter)
 {
-    vTaskDelay(pdMS_TO_TICKS(100));
-
-    if (bmp280_setup(21, 22) == ESP_OK)
-    {
-        printf("BMP280 init success!\n");
-    }
-    else
-    {
-        printf("BMP280 init failed. Check wiring or I2C address.\n");
-    }
-
-    
- 
-
-        if (take_measurement(temperature, pressure) == ESP_OK)
-        {
-            ESP_LOGI(TAG, "Temp: %.2f C | Pres: %.2f Pa", temperature, pressure);
-        }
-        else
-        {
-            ESP_LOGE(TAG, "Measurement failed");
-        }
-    
-}
-
-void bmp280_start_task()
-{
-    xTaskCreate(bmp280_task, "BMP280_Task", 4096, NULL, 10, NULL);
+    // printf("%f", *parameter);
+    xTaskCreate(bmp280_task, "BMP280_Task", 4096, parameter, 10, NULL);
 }

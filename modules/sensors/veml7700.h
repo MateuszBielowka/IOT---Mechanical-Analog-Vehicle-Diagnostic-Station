@@ -30,7 +30,7 @@ extern "C"
 
     void veml7700_task(void *arg);
 
-    void veml7700_start_task(void);
+    void veml7700_start_task(double *parameter);
 
 #ifdef __cplusplus
 }
