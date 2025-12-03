@@ -83,10 +83,8 @@ void adxl345_task(void *arg)
             y = y - ADXL345_Y_AXIS_CORRECTION;
             z = z - ADXL345_EARTH_GRAVITY_MS2;
             combined_acceleration = sqrtf(x*x + y*y + z*z);
-            // Display data on Monitor
-            // Note: These are raw values. For G-force, multiply by 0.0039 (approx 4mg/LSB)
-            // ESP_LOGI(TAG, "X=%.3f m/s²  Y=%.3f m/s²  Z=%.3f m/s², ALL=%.3f m/s²", x, y, z, combined_acceleration);
-            *(double *)arg = combined_acceleration;
+          
+            *(float *)arg = combined_acceleration;
         }
 
         // Wait for 500ms before next read
@@ -94,7 +92,7 @@ void adxl345_task(void *arg)
     }
 }
 
-void adxl345_start_task(double*parameter)
+void adxl345_start_task(float* parameter)
 {
     xTaskCreate(adxl345_task, "ADXL345_Task", 4096, parameter, 10, NULL);
 }

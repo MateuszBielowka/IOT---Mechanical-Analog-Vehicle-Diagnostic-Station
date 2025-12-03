@@ -1,44 +1,30 @@
-#include "nvs_flash.h" // pamiec flash
-#include "esp_log.h"   // logowanie wiadomosci
+#include "project_config.h"
 
-// importy
-#include "wifi_station.h"
-#include "status_led.h"
-#include "http_client.h"
-#include "freertos/FreeRTOS.h"
-#include "freertos/task.h"
 #include <stdio.h>
 #include <string.h>
 
-#include "hcsr04.h"
-#include "bmp280.h"
-#include "veml7700.h"
-#include "max6675.h"
-#include "adxl345.h"
-#include "storage_manager.h"
-
-#include "freertos/FreeRTOS.h"
-#include "freertos/task.h"
+#include "esp_log.h"   // logowanie wiadomosci
+#include "nvs_flash.h" // pamiec flash
 
 #include "driver/i2c.h"        // Required for i2c_config_t, I2C_MODE_MASTER, i2c_driver_install
 #include "driver/gpio.h"       // Required for GPIO_PULLUP_ENABLE
 #include "driver/spi_master.h" // <--- Add this include at the top
 
-// i2c bmp280 + adxl345
-#define I2C_MASTER_NUM I2C_NUM_0
-#define PORT_0_SDA_PIN 21
-#define PORT_0_SCL_PIN 22
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 
-// i2c veml7700
-#define I2C_MASTER_NUM I2C_NUM_1
-#define PORT_1_SDA_PIN 25
-#define PORT_1_SCL_PIN 26
+#include "storage_manager.h"
+#include "bmp280.h"
+#include "veml7700.h"
+#include "max6675.h"
+#include "adxl345.h"
+#include "hcsr04.h"
 
-// spi
-#define PIN_CLK 14
-#define PIN_SO 12 // MISO
-// MOSI is not needed for MAX6675, but SPI driver might need a pin number or -1
-#define PIN_MOSI -1
+#include "wifi_station.h"
+#include "status_led.h"
+#include "http_client.h"
+
+#include "buzzer.h"
 
 // stałe do zastąpienia funkcjami i zmiennymi
 #define BLE_PAIRED_SUCCESS true
@@ -46,58 +32,96 @@
 #define WIFI_STATION_CHECK_CREDETIALS true
 #define WIFI_CONNECTED_SUCCESS true
 
-// tag do logowania w konsoli
+// Console tag
 static const char *TAG = "app_main";
 
-void init_i2c_global(void)
+typedef struct
 {
-  i2c_config_t conf0 = {
-      .mode = I2C_MODE_MASTER,
-      .sda_io_num = PORT_0_SDA_PIN,
-      .scl_io_num = PORT_0_SCL_PIN,
-      .sda_pullup_en = GPIO_PULLUP_ENABLE,
-      .scl_pullup_en = GPIO_PULLUP_ENABLE,
-      .master.clk_speed = 100000,
-  };
-  // Install the driver ONCE.
-  // If this errors, nothing else will work.
-  ESP_ERROR_CHECK(i2c_param_config(I2C_NUM_0, &conf0));
-  ESP_ERROR_CHECK(i2c_driver_install(I2C_NUM_0, conf0.mode, 0, 0, 0));
-  printf(">>> I2C Driver Installed Globally <<<\n");
+  float temperature;
+  float illuminance;
+  float engine_temp;
+  float distance;
+  float acceleration;
+} sensor_data_t;
 
-  i2c_config_t conf1 = {
+static esp_err_t init_i2c_bus(i2c_port_t port, int sda, int scl, uint32_t freq)
+{
+  i2c_config_t conf = {
       .mode = I2C_MODE_MASTER,
-      .sda_io_num = PORT_1_SDA_PIN,
-      .scl_io_num = PORT_1_SCL_PIN,
+      .sda_io_num = sda,
+      .scl_io_num = scl,
       .sda_pullup_en = GPIO_PULLUP_ENABLE,
       .scl_pullup_en = GPIO_PULLUP_ENABLE,
-      .master.clk_speed = 100000,
+      .master.clk_speed = freq,
   };
-  // Install the driver ONCE.
-  // If this errors, nothing else will work.
-  ESP_ERROR_CHECK(i2c_param_config(I2C_NUM_1, &conf1));
-  ESP_ERROR_CHECK(i2c_driver_install(I2C_NUM_1, conf1.mode, 0, 0, 0));
-  printf(">>> I2C Driver Installed Globally <<<\n");
+
+  ESP_ERROR_CHECK(i2c_param_config(port, &conf));
+  return i2c_driver_install(port, conf.mode, 0, 0, 0);
 }
 
-void init_spi_global(void)
+static void init_i2c(void)
 {
-  printf("Initializing SPI Bus...\n");
+  init_i2c_bus(I2C_NUM_0, PORT_0_SDA_PIN, PORT_0_SCL_PIN, 100000);
+  init_i2c_bus(I2C_NUM_1, PORT_1_SDA_PIN, PORT_1_SCL_PIN, 100000);
+  ESP_LOGI(TAG, "I2C initialized.");
+}
 
+static void init_spi(void)
+{
   spi_bus_config_t buscfg = {
       .miso_io_num = PIN_SO,
       .mosi_io_num = PIN_MOSI,
       .sclk_io_num = PIN_CLK,
       .quadwp_io_num = -1,
-      .quadhd_io_num = -1,
-      .max_transfer_sz = 0, // Default
-  };
+      .quadhd_io_num = -1};
 
-  // Initialize SPI2_HOST (FSPI)
-  // SPI_DMA_CH_AUTO lets ESP32 pick the best DMA settings
   ESP_ERROR_CHECK(spi_bus_initialize(SPI2_HOST, &buscfg, SPI_DMA_CH_AUTO));
+  ESP_LOGI(TAG, "SPI initialized.");
+}
 
-  printf(">>> SPI Bus Initialized <<<\n");
+static void init_nvs(void)
+{
+  esp_err_t ret = nvs_flash_init();
+
+  if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND)
+  {
+    ESP_ERROR_CHECK(nvs_flash_erase());
+    ret = nvs_flash_init();
+  }
+
+  ESP_ERROR_CHECK(ret);
+}
+
+static sensor_data_t collect_sensor_data(
+    float bmp, float lux, float eng, float dist, float accel)
+{
+  sensor_data_t data = {
+      .temperature = bmp,
+      .illuminance = lux,
+      .engine_temp = eng,
+      .distance = dist,
+      .acceleration = accel};
+  return data;
+}
+
+static void print_sensor_data(const sensor_data_t *data)
+{
+  printf("BMP280:    %.2f C\n", data->temperature);
+  printf("VEML7700:  %.2f Lux\n", data->illuminance);
+  printf("MAX6675:   %.2f C\n", data->engine_temp);
+  printf("HC-SR04:   %.2f cm\n", data->distance);
+  printf("ADXL345:   %.2f m/s2\n", data->acceleration);
+}
+
+static void format_sensor_line(char *out, size_t len, const sensor_data_t *d)
+{
+  snprintf(out, len,
+           "BMP280: %.2f C\n"
+           "VEML7700: %.2f Lux\n"
+           "MAX6675: %.2f C\n"
+           "HC-SR04: %.2f cm\n"
+           "ADXL345: %.2f m/s2\n",
+           d->temperature, d->illuminance, d->engine_temp, d->distance, d->acceleration);
 }
 
 void get_line_from_console(char *buffer, size_t max_len)
@@ -134,43 +158,31 @@ void get_line_from_console(char *buffer, size_t max_len)
 
 void app_main(void)
 {
-  init_i2c_global();
-  init_spi_global();
-  vTaskDelay(pdMS_TO_TICKS(500));
+  init_i2c();
+  init_spi();
+  init_nvs();
 
-  double bmp280_parameter = 0.0;
-  double veml7700_parameters = 0.0;
-  double max6675_parameters = 0.0;
-  double adxl345_parameters = 0.0;
-  double hcsr04_parameters = 0.0;
-
-  bmp280_start_task(&bmp280_parameter);
-  veml7700_start_task(&veml7700_parameters);
-  max6675_start_task(&max6675_parameters);
-  adxl345_start_task(&adxl345_parameters);
-  hcsr04_start_task(&hcsr04_parameters);
-
-  // 1. Inicjalizacja NVS (Systemowa)
-  esp_err_t ret = nvs_flash_init();
-  if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND)
-  {
-    ESP_ERROR_CHECK(nvs_flash_erase());
-    ret = nvs_flash_init();
-  }
-
-  // 2. Inicjalizacja naszego modułu STORAGE
   storage_init();
+  vTaskDelay(pdMS_TO_TICKS(STARTUP_DELAY_MS));
 
-  // --- CZYSZCZENIE BUFORA WEJŚCIOWEGO NA STARCIE ---
+  float bmp280_temp = 0.0f, veml7700_illuminance = 0.0f, max6675_engine_temp = 0.0f, adxl345_acceleration = 0.0f, hcsr04_distance = 0.0f;
+
+  bmp280_start_task(&bmp280_temp);
+  veml7700_start_task(&veml7700_illuminance);
+  max6675_start_task(&max6675_engine_temp);
+  adxl345_start_task(&adxl345_acceleration);
+  hcsr04_start_task(&hcsr04_distance);
+  
+  buzzer_init(GPIO_NUM_18); 
+  buzzer_beep(500);
+
   int c;
   while ((c = fgetc(stdin)) != EOF)
   {
-    // Po prostu ignorujemy znaki, które przyszły przed startem pętli
+    // Ignore input during sensor startup
     vTaskDelay(10 / portTICK_PERIOD_MS);
   }
 
-  ESP_ERROR_CHECK(ret);
-  ESP_LOGI(TAG, "Start aplikacji...");
   char input_line[128];
 
   while (1)
@@ -205,22 +217,17 @@ void app_main(void)
 
       bool valid = true;
 
-      if (valid)
-      {
+  
         char line[128];
         snprintf(line, sizeof(line), "BMP280 LM: %.2f C\nVEML7700 LM: %.2f Lux\nMAX6675 LM: %.2f C\nHC-SR04 LM: %.2f cm\nADXL345 LM: %.2f m/s2\n",
-                 bmp280_parameter, veml7700_parameters, max6675_parameters, hcsr04_parameters, adxl345_parameters);
-        printf("BMP280 LM: %.2f C \n\nVEML7700 LM: %.2f Lux\nMAX6675 LM: %.2f C\nHC-SR04 LM: %.2f cm\nADXL345 LM: %.2f m/s2\n",
-               bmp280_parameter, veml7700_parameters, max6675_parameters, hcsr04_parameters, adxl345_parameters);
+                 bmp280_temp, veml7700_illuminance, max6675_engine_temp, hcsr04_distance, adxl345_acceleration);
+        printf("BMP280 LM: %.2f C \nVEML7700 LM: %.2f Lux\nMAX6675 LM: %.2f C\nHC-SR04 LM: %.2f cm\nADXL345 LM: %.2f m/s2\n",
+               bmp280_temp, veml7700_illuminance, max6675_engine_temp, hcsr04_distance, adxl345_acceleration);
         if (storage_write_line(line))
         {
           printf(">> Zapisano.\n");
         }
-      }
-      else
-      {
-        printf("Brak poprawnego pomiaru (czujnik jeszcze nie wykonał odczytu)\n");
-      }
+
     }
     else
     {

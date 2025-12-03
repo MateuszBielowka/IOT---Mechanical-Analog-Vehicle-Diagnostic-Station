@@ -29,6 +29,6 @@ esp_err_t adxl345_read_data(float *x, float *y, float *z);
 
 void adxl345_task(void *arg);
 
-void adxl345_start_task(double *parameter);
+void adxl345_start_task(float *parameter);
 
 #endif // ADXL345_H

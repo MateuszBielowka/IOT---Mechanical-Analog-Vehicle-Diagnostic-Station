@@ -1,3 +1,5 @@
+#include "project_config.h"
+
 /* bmp280.c */
 #include "bmp280.h"
 #include "driver/i2c.h"
@@ -132,36 +134,36 @@ esp_err_t take_measurement(float *temperature, float *pressure)
 
 void bmp280_task(void *arg)
 {
-    printf("BMP280 Task Started with parameter: %f\n", *(double *)arg);
-    vTaskDelay(pdMS_TO_TICKS(100));
-
-    if (bmp280_setup(21, 22) == ESP_OK)
+    while (1)
     {
-        ESP_LOGI(TAG, "init success!");
-    }
-    else
-    {
-        ESP_LOGE(TAG, "init failed. Check wiring or I2C address.");
+        ESP_LOGI(TAG, "Initializing BMP280...");
+        if (bmp280_setup(GPIO_NUM_21, GPIO_NUM_22) == ESP_OK)
+        {
+            break;
+        }
+        else
+        {
+            ESP_LOGE(TAG, "BMP280 Initialization Failed. Retrying in 5 seconds...");
+            vTaskDelay(pdMS_TO_TICKS(5000));
+        }
     }
     while (1)
     {
         float temperature = 0.0f, pressure = 0.0f;
-
         if (take_measurement(&temperature, &pressure) == ESP_OK)
         {
-            // ESP_LOGI(TAG, "Temp: %.2f C | Pres: %.2f Pa", temperature, pressure);
-            *(double *)arg = temperature; // just to use the parameter
+            *(float*)arg = temperature;
+            vTaskDelay(pdMS_TO_TICKS(BMP280_MEASUREMENT_INTERVAL_MS));
         }
         else
         {
             ESP_LOGE(TAG, "Measurement failed");
+            vTaskDelay(pdMS_TO_TICKS(INCORRECT_MEASUREMENT_INTERVAL_MS));
         }
-        vTaskDelay(pdMS_TO_TICKS(2000));
     }
 }
 
-void bmp280_start_task(double *parameter)
+void bmp280_start_task(float *parameter)
 {
-    // printf("%f", *parameter);
     xTaskCreate(bmp280_task, "BMP280_Task", 4096, parameter, 10, NULL);
 }

@@ -11,6 +11,7 @@
         storage
         ble_service
         status_led
+        buzzer
     PRIV_REQUIRES
         nvs_flash
         wifi_station

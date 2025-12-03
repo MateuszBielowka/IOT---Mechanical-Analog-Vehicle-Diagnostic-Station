@@ -3,8 +3,8 @@
 
 #include <stdbool.h>
 
-void hcsr04_task(void *pvParameters);
+void hcsr04_task(void *arg);
 
-void hcsr04_start_task(double *parameter);
+void hcsr04_start_task(float *parameter);
 
 #endif // HCSR04

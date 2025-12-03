@@ -1,37 +1,79 @@
+#include "project_config.h"
 
 #include <stdio.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "esp_log.h"
 #include "hcsr04_driver.h"
+#include "esp_timer.h"
+#include "buzzer.h"
 
-static const char *TAG = "HCSR04";
-
-void hcsr04_task(void *pvParameters)
+void hcsr04_task(void *arg)
 {
     esp_err_t return_value = ESP_OK;
-    (void)UltrasonicInit();
+    UltrasonicInit();
 
-    // create variable which stores the measured distance
-    static uint32_t afstand = 0;
+    static uint32_t distance = 0;
+    float *shared_value = (float *)arg;
+
+    int success_count = 0;
+    bool medium_mode = false;
+    bool fast_mode = false;
+    int64_t fast_mode_start_time = 0;
+
 
     while (1)
     {
-        return_value = UltrasonicMeasure(100, &afstand);
-        UltrasonicAssert(return_value);
+        return_value = UltrasonicMeasure(200, &distance);
+
         if (return_value == ESP_OK)
         {
-            // ESP_LOGI(TAG, "Distance: %ldcm", afstand);
-            *(double *)pvParameters = (double)afstand;
+            if (!medium_mode)
+            {
+                medium_mode = true;
+            }
+            *shared_value = (float)distance;
+            success_count++;
+            buzzer_set_distance(distance);
+
+            if (!fast_mode && success_count >= HCSR04_TRIGGER_COUNT)
+            {
+                medium_mode = false;
+                fast_mode = true;
+                fast_mode_start_time = esp_timer_get_time();
+
+                // buzzer_enable_park(true);
+            }
+        }
+        else
+        {
+            success_count = 0;
+            medium_mode = false;
         }
 
-        // 0,5 second delay before starting new measurement
-        vTaskDelay(500 / portTICK_PERIOD_MS);
+        if (fast_mode)
+        {
+            int64_t elapsed = esp_timer_get_time() - fast_mode_start_time;
+
+            if (elapsed >= (int64_t)HCSR04_FASTMODE_TIMEOUT_MS * 1000)
+            {
+                fast_mode = false;
+                success_count = 0;
+
+                // buzzer_enable_park(false);
+            }
+        }
+
+        if (fast_mode)
+            vTaskDelay(pdMS_TO_TICKS(HCSR04_FASTMODE_INTERVAL_MS));
+        else if (medium_mode)
+            vTaskDelay(pdMS_TO_TICKS(HCSR04_FASTMODE_INTERVAL_MS * 2));
+        else
+            vTaskDelay(pdMS_TO_TICKS(HCSR04_SLOWMODE_INTERVAL_MS));
     }
 }
 
-void hcsr04_start_task(double *parameter)
+void hcsr04_start_task(float *parameter)
 {
-    // Create measurement task
-    xTaskCreate(hcsr04_task, "HSRC04 task", 2048, parameter, 4, NULL);
+    xTaskCreate(hcsr04_task, "HSRC04 task", 8192, parameter, 4, NULL);
 }

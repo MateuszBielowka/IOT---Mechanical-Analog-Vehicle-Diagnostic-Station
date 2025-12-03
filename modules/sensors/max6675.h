@@ -19,6 +19,11 @@ typedef struct
     spi_device_handle_t spi_dev;
 } max6675_handle_t;
 
+typedef struct {
+    float temperature;
+    uint32_t seconds;
+} max6675_sample_t;
+
 /**
  * @brief Initialize the MAX6675 sensor
  *
@@ -37,7 +42,8 @@ esp_err_t max6675_init(const max6675_config_t *cfg, max6675_handle_t *out_handle
 float max6675_read_celsius(max6675_handle_t *handle);
 
 void max6675_task(void *arg);
-
-void max6675_start_task(double *parameter);
+void max6675_profile_task(void *arg);
+void max6675_start_task(float *parameter);
+void max6675_start_profile_task(max6675_sample_t *result_array);
 
 #endif // MAX6675_H

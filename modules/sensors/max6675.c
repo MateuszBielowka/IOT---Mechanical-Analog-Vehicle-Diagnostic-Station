@@ -1,7 +1,10 @@
+#include "project_config.h"
+
 #include "max6675.h"
 #include "driver/gpio.h"
 #include "esp_log.h"
 #include <string.h>
+#include <freertos/semphr.h>
 
 #define PIN_CLK 14
 #define PIN_CS 15
@@ -9,11 +12,10 @@
 #define MY_SPI_HOST SPI2_HOST
 
 static const char *TAG = "MAX6675";
+static SemaphoreHandle_t max6675_mutex = NULL;
 
 esp_err_t max6675_init(const max6675_config_t *cfg, max6675_handle_t *out_handle)
 {
-    // We assume main.c ran spi_bus_initialize().
-    // We only add the device here.
 
     spi_device_interface_config_t devcfg = {
         .clock_speed_hz = 1000000,      // 1 MHz
@@ -22,25 +24,30 @@ esp_err_t max6675_init(const max6675_config_t *cfg, max6675_handle_t *out_handle
         .queue_size = 1,                // Queue 1 transaction
     };
 
-    // Add device to the SPI Host
     esp_err_t ret = spi_bus_add_device(cfg->spi_host, &devcfg, &out_handle->spi_dev);
-
     if (ret != ESP_OK)
     {
         ESP_LOGE(TAG, "Failed to add device to SPI bus. Check main.c SPI init.");
     }
-
     return ret;
 }
 
 float max6675_read_celsius(max6675_handle_t *handle)
 {
+    // Wait max 100ms for access
+    if (xSemaphoreTake(max6675_mutex, pdMS_TO_TICKS(100)) != pdTRUE) {
+        ESP_LOGW(TAG, "MAX6675 busy");
+        return -1.0f;
+    }
+    
     spi_transaction_t t = {
         .flags = SPI_TRANS_USE_RXDATA,
         .length = 16,
         .rxlength = 16};
 
     esp_err_t ret = spi_device_transmit(handle->spi_dev, &t);
+    xSemaphoreGive(max6675_mutex);
+
     if (ret != ESP_OK)
     {
         ESP_LOGE(TAG, "SPI Transmission Failed");
@@ -54,10 +61,10 @@ float max6675_read_celsius(max6675_handle_t *handle)
     {
         return -1.0f; // Error: Thermocouple unplugged
     }
-
     value >>= 3;          // Discard status bits
     return value * 0.25f; // 0.25 C per LSB
 }
+
 
 void max6675_task(void *arg)
 {
@@ -85,19 +92,70 @@ void max6675_task(void *arg)
         if (temp < 0)
         {
             ESP_LOGE(TAG, "Error: Thermocouple open or disconnected");
-            vTaskDelay(pdMS_TO_TICKS(1000));
+            vTaskDelay(pdMS_TO_TICKS(INCORRECT_MEASUREMENT_INTERVAL_MS));
         }
         else
         {
-            // ESP_LOGI(TAG, "Temperature: %.2f C", temp);
-            *(double *)arg = temp;
-            // TODO: save the temaperature measurement
-            vTaskDelay(pdMS_TO_TICKS(3600000));
+            *(float *)arg = temp;
+            vTaskDelay(pdMS_TO_TICKS(MAX6675_MEASUREMENT_INTERVAL_MS));
         }
     }
 }
 
-void max6675_start_task(double *parameter)
+void max6675_profile_task(void *arg)
 {
+    max6675_sample_t *results = (max6675_sample_t *)arg;
+
+    max6675_config_t config = {
+        .cs_io_num = PIN_CS,
+        .spi_host = MY_SPI_HOST
+    };
+
+    max6675_handle_t sensor;
+
+    if (max6675_init(&config, &sensor) != ESP_OK)
+    {
+        ESP_LOGE(TAG, "Init Failed! Deleting Task.");
+        vTaskDelete(NULL);
+    }
+    TickType_t start_ticks = xTaskGetTickCount();
+
+    int measurement_idx = 0;
+    while (measurement_idx < MAX6675_PROFILE_SAMPLES_COUNT)
+    {
+        float temp = max6675_read_celsius(&sensor);
+
+        if (temp < 0)
+        {
+            ESP_LOGE(TAG, "Error: Thermocouple open or disconnected");
+            vTaskDelay(pdMS_TO_TICKS(INCORRECT_MEASUREMENT_INTERVAL_MS));
+            continue;
+        }
+
+        TickType_t now = xTaskGetTickCount();
+        uint32_t elapsed_ms = (now - start_ticks) * (1000 / configTICK_RATE_HZ);
+
+        results[measurement_idx].temperature = temp;
+        results[measurement_idx].seconds = elapsed_ms / 1000;
+
+        measurement_idx++;
+
+        vTaskDelay(pdMS_TO_TICKS(FREQUENT_MEASUREMENT_INTERVAL_MS));
+    }
+    vTaskDelete(NULL);
+}
+
+
+void max6675_start_task(float *parameter)
+{
+    if (max6675_mutex == NULL)
+        max6675_mutex = xSemaphoreCreateMutex();
     xTaskCreate(max6675_task, "max6675_task", 4096, parameter, 5, NULL);
+}
+
+void max6675_start_profile_task(max6675_sample_t *result_array)
+{
+    if (max6675_mutex == NULL)
+        max6675_mutex = xSemaphoreCreateMutex();
+    xTaskCreate(max6675_profile_task, "max6675_profile_task", 4096, result_array, 5, NULL);
 }
