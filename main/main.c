@@ -31,8 +31,6 @@
 // stałe do zastąpienia funkcjami i zmiennymi
 #define BLE_PAIRED_SUCCESS true
 #define MEMORY_USAGE_PERCENT 75
-#define WIFI_STATION_CHECK_CREDETIALS true
-#define WIFI_CONNECTED_SUCCESS true
 
 // Console tag
 static const char *TAG = "app_main";
@@ -177,6 +175,20 @@ void app_main(void)
   
   buzzer_init(GPIO_NUM_18); 
   buzzer_beep(500);
+  // bool have_wifi_credentials = wifi_check_credentials();
+
+  // ble_server_init();
+
+  // if(have_wifi_credentials)
+  // {
+  //   ESP_LOGI(TAG, "Dane WiFi dostępne. Inicjalizacja stacji WiFi...");
+  //   wifi_station_init();
+  // }
+  // else
+  // {
+  //   ESP_LOGW(TAG, "Brak danych WiFi. Uruchom tryb konfiguracji BLE.");
+  // }
+
 
   int c;
   while ((c = fgetc(stdin)) != EOF)

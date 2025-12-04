@@ -140,6 +140,26 @@ void wifi_force_reconnect(void) {
     ESP_ERROR_CHECK(esp_wifi_start());
 }
 
+bool wifi_check_credentials(void)
+{
+    nvs_handle_t my_handle;
+    char ssid[33] = {0};
+    size_t len = sizeof(ssid);
+
+    if (nvs_open("storage", NVS_READONLY, &my_handle) == ESP_OK) {
+        nvs_get_str(my_handle, "wifi_ssid", ssid, &len);
+        nvs_close(my_handle);
+    }
+
+    if (strlen(ssid) == 0) {
+        ESP_LOGW(TAG_WIFI, "Brak konfiguracji WiFi w NVS!");
+        return false;
+    } else {
+        ESP_LOGI(TAG_WIFI, "Konfiguracja WiFi dostępna: SSID=%s", ssid);
+        return true;
+    }
+}   
+
 bool wifi_station_is_connected(void)
 {
     return s_is_wifi_connected;
