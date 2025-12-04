@@ -2,6 +2,8 @@
 
 #include <stdio.h>
 #include <string.h>
+#include "storage_manager.h"
+#include "ble_server.h"      // Bluetooth (Konfiguracja)
 
 #include "esp_log.h"   // logowanie wiadomosci
 #include "nvs_flash.h" // pamiec flash

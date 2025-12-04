@@ -21,4 +21,5 @@
         log
         spiffs
         storage_manager
+        ble_service
 )
