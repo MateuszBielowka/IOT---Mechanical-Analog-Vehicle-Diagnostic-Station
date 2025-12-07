@@ -4,13 +4,9 @@
     INCLUDE_DIRS
         "."
     REQUIRES
-        wifi_station
-        http_client
         mqtt_client
         sensors
         storage
-        ble_service
-        status_led
         buzzer
     PRIV_REQUIRES
         nvs_flash
@@ -22,4 +18,5 @@
         spiffs
         storage_manager
         ble_service
+        button
 )

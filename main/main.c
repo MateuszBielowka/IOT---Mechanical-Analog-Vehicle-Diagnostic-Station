@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <string.h>
 #include "storage_manager.h"
+#include "button.h"
 #include "ble_server.h"      // Bluetooth (Konfiguracja)
 
 #include "esp_log.h"   // logowanie wiadomosci
@@ -165,29 +166,30 @@ void app_main(void)
   storage_init();
   vTaskDelay(pdMS_TO_TICKS(STARTUP_DELAY_MS));
 
-  float bmp280_temp = 0.0f, veml7700_illuminance = 0.0f, max6675_engine_temp = 0.0f, adxl345_acceleration = 0.0f, hcsr04_distance = 0.0f;
+  // float bmp280_temp = 0.0f, veml7700_illuminance = 0.0f, max6675_engine_temp = 0.0f, adxl345_acceleration = 0.0f, hcsr04_distance = 0.0f;
 
-  bmp280_start_task(&bmp280_temp);
-  veml7700_start_task(&veml7700_illuminance);
-  max6675_start_task(&max6675_engine_temp);
-  adxl345_start_task(&adxl345_acceleration);
-  hcsr04_start_task(&hcsr04_distance);
+  // bmp280_start_task(&bmp280_temp);
+  // veml7700_start_task(&veml7700_illuminance);
+  // max6675_start_task(&max6675_engine_temp);
+  // adxl345_start_task(&adxl345_acceleration);
+  // hcsr04_start_task(&hcsr04_distance);
   
-  buzzer_init(GPIO_NUM_18); 
-  buzzer_beep(500);
-  // bool have_wifi_credentials = wifi_check_credentials();
+  // buzzer_init(GPIO_NUM_18); 
+  // buzzer_beep(500);
+  button_init();
+  bool have_wifi_credentials = wifi_check_credentials();
 
   // ble_server_init();
 
-  // if(have_wifi_credentials)
-  // {
-  //   ESP_LOGI(TAG, "Dane WiFi dostępne. Inicjalizacja stacji WiFi...");
-  //   wifi_station_init();
-  // }
-  // else
-  // {
-  //   ESP_LOGW(TAG, "Brak danych WiFi. Uruchom tryb konfiguracji BLE.");
-  // }
+  if(have_wifi_credentials)
+  {
+    ESP_LOGI(TAG, "Dane WiFi dostępne. Inicjalizacja stacji WiFi...");
+    wifi_station_init();
+  }
+  else
+  {
+    ESP_LOGW(TAG, "Brak danych WiFi. Uruchom tryb konfiguracji BLE.");
+  }
 
 
   int c;
@@ -232,15 +234,15 @@ void app_main(void)
       bool valid = true;
 
   
-        char line[128];
-        snprintf(line, sizeof(line), "BMP280 LM: %.2f C\nVEML7700 LM: %.2f Lux\nMAX6675 LM: %.2f C\nHC-SR04 LM: %.2f cm\nADXL345 LM: %.2f m/s2\n",
-                 bmp280_temp, veml7700_illuminance, max6675_engine_temp, hcsr04_distance, adxl345_acceleration);
-        printf("BMP280 LM: %.2f C \nVEML7700 LM: %.2f Lux\nMAX6675 LM: %.2f C\nHC-SR04 LM: %.2f cm\nADXL345 LM: %.2f m/s2\n",
-               bmp280_temp, veml7700_illuminance, max6675_engine_temp, hcsr04_distance, adxl345_acceleration);
-        if (storage_write_line(line))
-        {
-          printf(">> Zapisano.\n");
-        }
+        // char line[128];
+        // snprintf(line, sizeof(line), "BMP280 LM: %.2f C\nVEML7700 LM: %.2f Lux\nMAX6675 LM: %.2f C\nHC-SR04 LM: %.2f cm\nADXL345 LM: %.2f m/s2\n",
+        //          bmp280_temp, veml7700_illuminance, max6675_engine_temp, hcsr04_distance, adxl345_acceleration);
+        // printf("BMP280 LM: %.2f C \nVEML7700 LM: %.2f Lux\nMAX6675 LM: %.2f C\nHC-SR04 LM: %.2f cm\nADXL345 LM: %.2f m/s2\n",
+        //        bmp280_temp, veml7700_illuminance, max6675_engine_temp, hcsr04_distance, adxl345_acceleration);
+        // if (storage_write_line(line))
+        // {
+        //   printf(">> Zapisano.\n");
+        // }
 
     }
     else
