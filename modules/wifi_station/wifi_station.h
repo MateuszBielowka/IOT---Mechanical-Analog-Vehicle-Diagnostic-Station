@@ -9,7 +9,8 @@
  * Automatycznie obsługuje ponowne łączenie w tle.
  */
 void wifi_station_init(void);
-
+void wifi_force_reconnect(void);
+bool wifi_check_credentials(void);
 /**
  * @brief Sprawdza aktualny stan połączenia Wi-Fi.
  * * @return true jeśli urządzenie jest połączone z Wi-Fi i ma adres IP,

@@ -6,6 +6,7 @@
 #include "nvs.h"
 #include "esp_gap_ble_api.h"
 #include "storage_manager.h"
+#include "wifi_station.h"
 
 // Zmienne statyczne na uchwyty
 static uint16_t s_service_handle;
@@ -119,6 +120,7 @@ void gatts_profile_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_t gatts
                 else if (param->write.handle == s_char_pass_handle) {
                     ESP_LOGI(TAG, "Pass: %s", buffer);
                     save_wifi_cred_to_nvs("wifi_pass", buffer);
+                    wifi_force_reconnect();
                 }
             }
             break;

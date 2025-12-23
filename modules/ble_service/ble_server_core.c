@@ -6,6 +6,13 @@
 #include "esp_bt_main.h"
 #include "esp_gap_ble_api.h"
 #include "esp_gatts_api.h"
+// #include "esp_timer.h"
+
+
+// #define BLE_TIMEOUT_MS 300000  // 5 minut
+
+// static esp_timer_handle_t ble_timeout_timer;
+
 
 // Konfiguracja Advertisingu
 static esp_ble_adv_params_t adv_params = {
@@ -88,4 +95,31 @@ void ble_server_init(void) {
     esp_ble_gatts_app_register(PROFILE_APP_ID);
     
     ESP_LOGI(TAG, "BLE Core zainicjowane.");
+
+    // //Timer - timeout wyłączenia BLE po określonym czasie
+    // if (ble_timeout_timer == NULL)
+    // {
+    //     const esp_timer_create_args_t args = {
+    //         .callback = &ble_timeout_callback,
+    //         .name = "ble_timeout"
+    //     };
+    //     esp_timer_create(&args, &ble_timeout_timer);
+    // }
+
+    // esp_timer_start_once(ble_timeout_timer, BLE_TIMEOUT_MS * 1000);
 }
+
+// void ble_server_stop(void)
+// {
+//     ESP_LOGI("BLE", "Wyłączam BLE provisioning (timeout lub user)...");
+
+//     esp_ble_gap_stop_advertising();
+//     esp_bluedroid_disable();
+//     esp_bluedroid_deinit();
+//     esp_bt_controller_disable();
+//     esp_bt_controller_deinit();
+
+//     if (ble_timeout_timer) {
+//         esp_timer_stop(ble_timeout_timer);
+//     }
+// }
