@@ -1,12 +1,4 @@
-#include "project_config.h"
-
-#include <stdio.h>
-#include "freertos/FreeRTOS.h"
-#include "freertos/task.h"
-#include "esp_log.h"
-#include "hcsr04_driver.h"
-#include "esp_timer.h"
-#include "buzzer.h"
+#include "hcsr04.h"
 
 void hcsr04_task(void *arg)
 {
@@ -20,7 +12,6 @@ void hcsr04_task(void *arg)
     bool medium_mode = false;
     bool fast_mode = false;
     int64_t fast_mode_start_time = 0;
-
 
     while (1)
     {

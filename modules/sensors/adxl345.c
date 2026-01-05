@@ -1,32 +1,29 @@
 #include "adxl345.h"
-#include "driver/i2c.h"
-#include "esp_log.h"
-#include <math.h>
 
-// I2C Configuration
-#define I2C_MASTER_NUM I2C_NUM_0
-#define I2C_SCL_IO 22      // ESP32 GPIO for SCL
-#define I2C_SDA_IO 21      // ESP32 GPIO for SDA
-#define I2C_FREQ_HZ 100000 // I2C Speed (100kHz)
-
-// ADXL345 Registers
-#define REG_POWER_CTL 0x2D   // Power Control Register
-#define REG_DATA_FORMAT 0x31 // Data Format Register
-#define REG_DATAX0 0x32      // Start of Data Registers (X-Low)
-
-#define ADXL345_LSB_TO_MS2 (0.004f * 9.80665f)
-#define ADXL345_X_AXIS_CORRECTION -0.037f
-#define ADXL345_Y_AXIS_CORRECTION -2.205f
-#define ADXL345_EARTH_GRAVITY_MS2 8.318f
 static const char *TAG = "ADXL345";
+
+uint8_t link = 1;
+uint8_t auto_sleep = 0;
+uint8_t measure_bit = 1;
+uint8_t sleep_bit = 0;
+uint8_t sleep_mode_frequency = 0; // 8 Hz
+uint8_t low_power = 0;
+uint8_t low_power_frequency = 0x0A; // 100 Hz
+uint64_t activity_threshold = 0;
+uint64_t inactivity_threshold = 0;
+uint64_t inactivity_time = 60;
+
+static esp_err_t read_register_adxl345(uint8_t reg_addr, uint8_t *data, size_t len);
+static esp_err_t write_register_adxl345(uint8_t reg_addr, uint8_t value);
+static esp_err_t configure_power_ctrl();
+static esp_err_t cofigure_bw_rate();
+static void convert_raw_data_to_ms2(int16_t rx, int16_t ry, int16_t rz, float *x, float *y, float *z);
+static float calculate_acceleration(float x, float y, float z);
 
 esp_err_t adxl345_init(void)
 {
-    // 3. Wake up the ADXL345
-    // We write to the POWER_CTL register (0x2D)
-    // Bit 3 (0x08) is the Measure bit. Setting it to 1 enables measurement.
     uint8_t data_enable[2] = {REG_POWER_CTL, 0x08};
-    esp_err_t err = i2c_master_write_to_device(I2C_MASTER_NUM, ADXL345_ADDR, data_enable, 2, 1000 / portTICK_PERIOD_MS);
+    esp_err_t err = i2c_master_write_to_device(ADXL345_PORT, ADXL345_ADDR, data_enable, 2, 1000 / portTICK_PERIOD_MS);
 
     if (err == ESP_OK)
     {
@@ -40,59 +37,203 @@ esp_err_t adxl345_init(void)
     return err;
 }
 
-esp_err_t adxl345_read_data(float *x, float *y, float *z)
+static esp_err_t read_register_adxl345(uint8_t reg_addr, uint8_t *data, size_t len)
 {
-    uint8_t reg = REG_DATAX0;
+    return i2c_master_write_read_device(ADXL345_PORT, ADXL345_ADDR, &reg_addr, 1, data, len, 1000);
+}
+
+static esp_err_t write_register_adxl345(uint8_t reg_addr, uint8_t value)
+{
+    uint8_t buf[2] = {reg_addr, value};
+    return i2c_master_write_to_device(ADXL345_PORT, ADXL345_ADDR, buf, 2, 1000);
+}
+
+static esp_err_t configure_power_ctrl()
+{
+    uint8_t power_ctl = (link << 5) | (auto_sleep << 4) | (measure_bit << 3) | (sleep_bit << 2) | sleep_mode_frequency;
+    return write_register_adxl345(REG_POWER_CTL, power_ctl);
+}
+
+static esp_err_t cofigure_bw_rate()
+{
+    uint8_t bw_rate = (low_power << 4) | low_power_frequency;
+    return write_register_adxl345(BW_RATE, bw_rate);
+}
+
+esp_err_t adxl345_configure()
+{
+    esp_err_t err = configure_power_ctrl();
+    if (err != ESP_OK)
+    {
+        ESP_LOGE(TAG, "Failed to configure power control: %s", esp_err_to_name(err));
+        return err;
+    }
+    err = cofigure_bw_rate();
+    if (err != ESP_OK)
+    {
+        ESP_LOGE(TAG, "Failed to configure bandwidth rate: %s", esp_err_to_name(err));
+        return err;
+    }
+    return ESP_OK;
+}
+
+esp_err_t adxl345_set_measurement_mode()
+{
+    measure_bit = 1;
+    esp_err_t err = configure_power_ctrl();
+
+    if (err != ESP_OK)
+    {
+        ESP_LOGE(TAG, "Failed to set measurement mode: %s", esp_err_to_name(err));
+        return err;
+    }
+    return ESP_OK;
+}
+
+esp_err_t adxl345_set_standby_mode()
+{
+    measure_bit = 0;
+    esp_err_t err = configure_power_ctrl();
+
+    if (err != ESP_OK)
+    {
+        ESP_LOGE(TAG, "Failed to set standby mode: %s", esp_err_to_name(err));
+        return err;
+    }
+    return ESP_OK;
+}
+
+esp_err_t adxl345_set_sleep_mode(bool enable)
+{
+    sleep_bit = enable ? 1 : 0;
+    esp_err_t err = configure_power_ctrl();
+
+    if (err != ESP_OK)
+    {
+        ESP_LOGE(TAG, "Failed to set sleep mode: %s", esp_err_to_name(err));
+        return err;
+    }
+    return ESP_OK;
+}
+
+esp_err_t adxl345_set_low_power_mode(bool enable)
+{
+    low_power = enable ? 1 : 0;
+    esp_err_t err = cofigure_bw_rate();
+
+    if (err != ESP_OK)
+    {
+        ESP_LOGE(TAG, "Failed to set low power mode: %s", esp_err_to_name(err));
+        return err;
+    }
+    return ESP_OK;
+}
+
+esp_err_t adxl345_set_low_power_rate(uint8_t rate)
+{
+    low_power_frequency = rate;
+    esp_err_t err = cofigure_bw_rate();
+
+    if (err != ESP_OK)
+    {
+        ESP_LOGE(TAG, "Failed to set data rate: %s", esp_err_to_name(err));
+        return err;
+    }
+    return ESP_OK;
+}
+
+esp_err_t adxl345_set_activity_threshold(uint8_t threshold)
+{
+    activity_threshold = threshold;
+    return write_register_adxl345(THRESH_ACT, activity_threshold);
+}
+
+esp_err_t adxl345_set_inactivity_threshold(uint8_t threshold)
+{
+    inactivity_threshold = threshold;
+    return write_register_adxl345(THRESH_INACT, inactivity_threshold);
+}
+
+esp_err_t adxl345_set_inactivity_time(uint8_t time)
+{
+    inactivity_time = time;
+    return write_register_adxl345(TIME_INACT, inactivity_time);
+}
+
+esp_err_t adxl345_set_frequency_in_sleep_mode(uint8_t frequency)
+{
+    sleep_mode_frequency = frequency;
+    esp_err_t err = configure_power_ctrl();
+
+    if (err != ESP_OK)
+    {
+        ESP_LOGE(TAG, "Failed to set frequency in sleep mode: %s", esp_err_to_name(err));
+        return err;
+    }
+    return ESP_OK;
+}
+
+esp_err_t adxl345_enable_auto_sleep(bool enable)
+{
+    auto_sleep = enable ? 1 : 0;
+    esp_err_t err = configure_power_ctrl();
+
+    if (err != ESP_OK)
+    {
+        ESP_LOGE(TAG, "Failed to set auto sleep: %s", esp_err_to_name(err));
+        return err;
+    }
+    err = adxl345_enable_all_axis_activity_detection();
+    if (err != ESP_OK)
+    {
+        ESP_LOGE(TAG, "Failed to enable all axis activity detection: %s", esp_err_to_name(err));
+        return err;
+    }
+    return ESP_OK;
+}
+
+esp_err_t adxl345_enable_all_axis_activity_detection()
+{
+    uint8_t act_inact_ctl;
+    esp_err_t err = read_register_adxl345(ACT_INACT_CTL, &act_inact_ctl, 1);
+    if (err != ESP_OK)
+    {
+        return err;
+    }
+    act_inact_ctl |= 0x07; // Set bits for X, Y, Z axes
+    return write_register_adxl345(ACT_INACT_CTL, act_inact_ctl);
+}
+
+static void convert_raw_data_to_ms2(int16_t rx, int16_t ry, int16_t rz, float *x, float *y, float *z)
+{
+    *x = rx * ADXL345_LSB_TO_MS2;
+    *y = ry * ADXL345_LSB_TO_MS2;
+    *z = rz * ADXL345_LSB_TO_MS2;
+}
+
+static float calculate_acceleration(float x, float y, float z)
+{
+    x = x - ADXL345_X_AXIS_CORRECTION;
+    y = y - ADXL345_Y_AXIS_CORRECTION;
+    z = z - ADXL345_EARTH_GRAVITY_MS2;
+    float combined_acceleration = sqrtf(x * x + y * y + z * z);
+    return combined_acceleration;
+}
+
+float adxl345_read_data()
+{
     uint8_t raw[6];
+    esp_err_t err = read_register_adxl345(REG_DATAX0, raw, 6);
 
-    esp_err_t err = i2c_master_write_read_device(
-        I2C_MASTER_NUM, ADXL345_ADDR,
-        &reg, 1, raw, 6,
-        100 / portTICK_PERIOD_MS);
-
-    if (err != ESP_OK) return err;
+    if (err != ESP_OK)
+        return -1.0f;
 
     int16_t rx = (int16_t)(raw[1] << 8 | raw[0]);
     int16_t ry = (int16_t)(raw[3] << 8 | raw[2]);
     int16_t rz = (int16_t)(raw[5] << 8 | raw[4]);
 
-    *x = rx * ADXL345_LSB_TO_MS2;
-    *y = ry * ADXL345_LSB_TO_MS2;
-    *z = rz * ADXL345_LSB_TO_MS2;
-
-    return ESP_OK;
-}
-
-
-void adxl345_task(void *arg)
-{
-    float combined_acceleration = 0.0f;
     float x, y, z;
-    if (adxl345_init() != ESP_OK)
-    {
-        ESP_LOGE(TAG, "Sensor init failed! Restarting...");
-    }
+    convert_raw_data_to_ms2(rx, ry, rz, &x, &y, &z);
 
-
-    while (1)
-    {
-        // Read data from sensor
-        if (adxl345_read_data(&x, &y, &z) == ESP_OK)
-        {
-            x = x - ADXL345_X_AXIS_CORRECTION;
-            y = y - ADXL345_Y_AXIS_CORRECTION;
-            z = z - ADXL345_EARTH_GRAVITY_MS2;
-            combined_acceleration = sqrtf(x*x + y*y + z*z);
-          
-            *(float *)arg = combined_acceleration;
-        }
-
-        // Wait for 500ms before next read
-        vTaskDelay(500 / portTICK_PERIOD_MS);
-    }
-}
-
-void adxl345_start_task(float* parameter)
-{
-    xTaskCreate(adxl345_task, "ADXL345_Task", 4096, parameter, 10, NULL);
+    return calculate_acceleration(x, y, z);
 }

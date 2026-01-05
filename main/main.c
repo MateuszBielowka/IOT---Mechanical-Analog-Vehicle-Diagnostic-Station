@@ -4,7 +4,7 @@
 #include <string.h>
 #include "storage_manager.h"
 #include "button.h"
-#include "ble_server.h"      // Bluetooth (Konfiguracja)
+#include "ble_server.h" // Bluetooth (Konfiguracja)
 
 #include "esp_log.h"   // logowanie wiadomosci
 #include "nvs_flash.h" // pamiec flash
@@ -16,12 +16,20 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
+#include "i2c_master_bus.h"
+#include "spi_master_bus.h"
+
 #include "storage_manager.h"
 #include "bmp280.h"
 #include "veml7700.h"
 #include "max6675.h"
 #include "adxl345.h"
 #include "hcsr04.h"
+
+#include "bmp280_task.h"
+#include "max6675_task.h"
+#include "veml7700_task.h"
+#include "adxl345_task.h"
 
 #include "wifi_station.h"
 #include "status_led.h"
@@ -45,39 +53,22 @@ typedef struct
   float acceleration;
 } sensor_data_t;
 
-static esp_err_t init_i2c_bus(i2c_port_t port, int sda, int scl, uint32_t freq)
+void initialize_master_buses(void)
 {
-  i2c_config_t conf = {
-      .mode = I2C_MODE_MASTER,
-      .sda_io_num = sda,
-      .scl_io_num = scl,
-      .sda_pullup_en = GPIO_PULLUP_ENABLE,
-      .scl_pullup_en = GPIO_PULLUP_ENABLE,
-      .master.clk_speed = freq,
-  };
-
-  ESP_ERROR_CHECK(i2c_param_config(port, &conf));
-  return i2c_driver_install(port, conf.mode, 0, 0, 0);
-}
-
-static void init_i2c(void)
-{
-  init_i2c_bus(I2C_NUM_0, PORT_0_SDA_PIN, PORT_0_SCL_PIN, 100000);
-  init_i2c_bus(I2C_NUM_1, PORT_1_SDA_PIN, PORT_1_SCL_PIN, 100000);
+  i2c_initialize_master(I2C_NUM_0, I2C_PORT_0_SDA_PIN, I2C_PORT_0_SCL_PIN, 100000); // BMP280 & ADXL345
+  i2c_initialize_master(I2C_NUM_1, I2C_PORT_1_SDA_PIN, I2C_PORT_1_SCL_PIN, 100000); // VEML7700
   ESP_LOGI(TAG, "I2C initialized.");
+  spi_initialize_master(SPI2_HOST, SPI_PORT_0_MISO_PIN, SPI_PORT_0_MOSI_PIN, SPI_PORT_0_SCK_PIN); // MAX6675
+  ESP_LOGI(TAG, "SPI initialized.");
 }
 
-static void init_spi(void)
+void initialize_devices(spi_device_handle_t *max6675_handle)
 {
-  spi_bus_config_t buscfg = {
-      .miso_io_num = PIN_SO,
-      .mosi_io_num = PIN_MOSI,
-      .sclk_io_num = PIN_CLK,
-      .quadwp_io_num = -1,
-      .quadhd_io_num = -1};
-
-  ESP_ERROR_CHECK(spi_bus_initialize(SPI2_HOST, &buscfg, SPI_DMA_CH_AUTO));
-  ESP_LOGI(TAG, "SPI initialized.");
+  veml7700_init();
+  bmp280_init();
+  adxl345_init();
+  max6675_init(max6675_handle);
+  ESP_LOGI(TAG, "Devices initialized.");
 }
 
 static void init_nvs(void)
@@ -93,8 +84,7 @@ static void init_nvs(void)
   ESP_ERROR_CHECK(ret);
 }
 
-static sensor_data_t collect_sensor_data(
-    float bmp, float lux, float eng, float dist, float accel)
+static sensor_data_t collect_sensor_data(float bmp, float lux, float eng, float dist, float accel)
 {
   sensor_data_t data = {
       .temperature = bmp,
@@ -159,8 +149,10 @@ void get_line_from_console(char *buffer, size_t max_len)
 
 void app_main(void)
 {
-  init_i2c();
-  init_spi();
+  initialize_master_buses();
+  spi_device_handle_t max6675_handle;
+  initialize_devices(&max6675_handle);
+
   init_nvs();
 
   storage_init();
@@ -173,8 +165,8 @@ void app_main(void)
   max6675_start_task(&max6675_engine_temp);
   adxl345_start_task(&adxl345_acceleration);
   hcsr04_start_task(&hcsr04_distance);
-  
-  buzzer_init(GPIO_NUM_18); 
+
+  buzzer_init(GPIO_NUM_18);
   buzzer_beep(500);
   // button_init();
   // bool have_wifi_credentials = wifi_check_credentials();
@@ -190,7 +182,6 @@ void app_main(void)
   // {
   //   ESP_LOGW(TAG, "Brak danych WiFi. Uruchom tryb konfiguracji BLE.");
   // }
-
 
   int c;
   while ((c = fgetc(stdin)) != EOF)
@@ -233,17 +224,15 @@ void app_main(void)
 
       bool valid = true;
 
-  
-        char line[128];
-        snprintf(line, sizeof(line), "BMP280 LM: %.2f C\nVEML7700 LM: %.2f Lux\nMAX6675 LM: %.2f C\nHC-SR04 LM: %.2f cm\nADXL345 LM: %.2f m/s2\n",
-                 bmp280_temp, veml7700_illuminance, max6675_engine_temp, hcsr04_distance, adxl345_acceleration);
-        printf("BMP280 LM: %.2f C \nVEML7700 LM: %.2f Lux\nMAX6675 LM: %.2f C\nHC-SR04 LM: %.2f cm\nADXL345 LM: %.2f m/s2\n",
+      char line[128];
+      snprintf(line, sizeof(line), "BMP280 LM: %.2f C\nVEML7700 LM: %.2f Lux\nMAX6675 LM: %.2f C\nHC-SR04 LM: %.2f cm\nADXL345 LM: %.2f m/s2\n",
                bmp280_temp, veml7700_illuminance, max6675_engine_temp, hcsr04_distance, adxl345_acceleration);
-        if (storage_write_line(line))
-        {
-          printf(">> Zapisano.\n");
-        }
-
+      printf("BMP280 LM: %.2f C \nVEML7700 LM: %.2f Lux\nMAX6675 LM: %.2f C\nHC-SR04 LM: %.2f cm\nADXL345 LM: %.2f m/s2\n",
+             bmp280_temp, veml7700_illuminance, max6675_engine_temp, hcsr04_distance, adxl345_acceleration);
+      if (storage_write_line(line))
+      {
+        printf(">> Zapisano.\n");
+      }
     }
     else
     {

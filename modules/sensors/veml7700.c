@@ -1,37 +1,7 @@
 /* veml7700.c */
 #include "veml7700.h"
-#include "driver/i2c.h"
-#include "esp_log.h"
-#include <math.h>
 
 static const char *TAG = "VEML7700";
-
-/* I2C Settings */
-#define I2C_PORT I2C_NUM_1
-#define I2C_FREQ_HZ 100000
-#define VEML7700_ADDR 0x10 // Fixed I2C address for VEML7700
-
-/* Registers */
-#define CMD_ALS_CONF 0x00 // Configuration Register
-#define CMD_ALS_DATA 0x04 // Ambient Light Data
-
-/*
- * Configuration Constants
- * We use Gain 1/8 and Integration Time 100ms.
- * This gives a range up to ~37,000 Lux (Good for indoors and outdoors).
- * Resolution = 0.576 lux/count.
- */
-#define CONF_GAIN_1_8 (0x02 << 11) // Bits 11:12
-#define CONF_IT_100MS (0x00 << 6)  // Bits 6:9
-#define CONF_SHUTDOWN (0x01)       // Bit 0
-
-#define LUX_RESOLUTION 0.576f
-
-/* Non-linear correction coefficients (from Vishay Datasheet) */
-#define COEF_A 6.0135e-13
-#define COEF_B -9.3924e-9
-#define COEF_C 8.1488e-5
-#define COEF_D 1.0023
 
 static esp_err_t write_reg(uint8_t reg, uint16_t val)
 {
@@ -39,13 +9,13 @@ static esp_err_t write_reg(uint8_t reg, uint16_t val)
     data[0] = reg;
     data[1] = (uint8_t)(val & 0xFF);        // LSB
     data[2] = (uint8_t)((val >> 8) & 0xFF); // MSB
-    return i2c_master_write_to_device(I2C_PORT, VEML7700_ADDR, data, 3, pdMS_TO_TICKS(100));
+    return i2c_master_write_to_device(VEML7700_PORT, VEML7700_ADDR, data, 3, pdMS_TO_TICKS(100));
 }
 
 static esp_err_t read_reg(uint8_t reg, uint16_t *val)
 {
     uint8_t raw[2];
-    esp_err_t ret = i2c_master_write_read_device(I2C_PORT, VEML7700_ADDR, &reg, 1, raw, 2, pdMS_TO_TICKS(100));
+    esp_err_t ret = i2c_master_write_read_device(VEML7700_PORT, VEML7700_ADDR, &reg, 1, raw, 2, pdMS_TO_TICKS(100));
     if (ret == ESP_OK)
     {
         *val = (uint16_t)raw[0] | ((uint16_t)raw[1] << 8);
@@ -53,48 +23,30 @@ static esp_err_t read_reg(uint8_t reg, uint16_t *val)
     return ret;
 }
 
-esp_err_t veml7700_init(int sda_pin, int scl_pin)
+esp_err_t veml7700_init(void)
 {
-    // 1. Setup I2C Config
-    i2c_config_t conf = {
-        .mode = I2C_MODE_MASTER,
-        .sda_io_num = sda_pin,
-        .scl_io_num = scl_pin,
-        .sda_pullup_en = GPIO_PULLUP_ENABLE,
-        .scl_pullup_en = GPIO_PULLUP_ENABLE,
-        .master.clk_speed = I2C_FREQ_HZ,
+    i2c_device_config_t dev_config = {
+        .dev_addr_length = I2C_ADDR_BIT_LEN_7,
+        .device_address = VEML7700_ADDR,
+        .scl_speed_hz = VEML7700_SPEED_HZ,
     };
-
-    // 2. Configure Sensor
-    // Value: Gain 1/8 | IT 100ms | No Interrupts | Power On (Shutdown bit = 0)
-    uint16_t config_val = CONF_GAIN_1_8 | CONF_IT_100MS;
-
-    // Note: We write 0 to the shutdown bit implicitly to turn it on
-    esp_err_t ret = write_reg(CMD_ALS_CONF, config_val);
-
-    if (ret != ESP_OK)
-    {
-        ESP_LOGE(TAG, "Failed to write config. Check wiring.");
-        return ret;
-    }
-
-    vTaskDelay(pdMS_TO_TICKS(10));
-    ESP_LOGI(TAG, "Initialized. Gain: 1/8, IT: 100ms");
+    i2c_master_dev_handle_t dev_handle;
+    i2c_master_bus_handle_t bus_handle;
+    ESP_ERROR_CHECK(i2c_master_get_bus_handle(0, &bus_handle));
+    ESP_ERROR_CHECK(i2c_master_bus_add_device(bus_handle, &dev_config, &dev_handle));
+    ESP_LOGI(TAG, "VEML7700 initialized on I2C address 0x%02X", VEML7700_ADDR);
     return ESP_OK;
 }
 
-esp_err_t veml7700_read_lux(float *lux_val)
+esp_err_t veml7700_delete(i2c_master_dev_handle_t dev_handle)
 {
-    uint16_t raw_counts = 0;
+    return i2c_master_bus_rm_device(dev_handle);
+}
 
-    esp_err_t ret = read_reg(CMD_ALS_DATA, &raw_counts);
-    if (ret != ESP_OK)
-        return ret;
-
+static float convert_raw_data(uint16_t raw_counts)
+{
     float lux = raw_counts * LUX_RESOLUTION;
 
-    // 3. Apply non-linear correction (Required by datasheet for VEML7700)
-    // This sensor is non-linear at higher light levels.
     if (lux > 1000.0f)
     {
         lux = (COEF_A * powf(lux, 4)) +
@@ -103,41 +55,18 @@ esp_err_t veml7700_read_lux(float *lux_val)
               (COEF_D * lux);
     }
 
-    *lux_val = lux;
-    return ESP_OK;
+    return lux;
 }
 
-void veml7700_task(void *arg)
+float veml7700_read_lux()
 {
-    // 1. Initialize sensor
-    if (veml7700_init(25, 26) == ESP_OK)
-    {
-        ESP_LOGI(TAG, "Sensor Init Success!");
-    }
-    else
-    {
-        ESP_LOGE(TAG, "Sensor Init Failed!");
-    }
+    uint16_t raw_counts = 0;
 
-    // 2. Loop to take measurements
-    while (1)
-    {
-        float lux = 0.0;
-        if (veml7700_read_lux(&lux) == ESP_OK)
-        {
-            // ESP_LOGI(TAG, "Light Level: %.2f Lux", lux);
-            *(float *)arg = lux;
-            vTaskDelay(pdMS_TO_TICKS(3600000));
-        }
-        else
-        {
-            ESP_LOGE(TAG, "Failed to read sensor");
-            vTaskDelay(pdMS_TO_TICKS(1000));
-        }
-    }
-}
+    esp_err_t ret = read_reg(CMD_ALS_DATA, &raw_counts);
+    if (ret != ESP_OK)
+        return -1.0f;
 
-void veml7700_start_task(float *parameter)
-{
-    xTaskCreate(veml7700_task, "VEML7700_Task", 4096, parameter, 10, NULL);
+    float lux = raw_counts * LUX_RESOLUTION;
+
+    return convert_raw_data(raw_counts);
 }
