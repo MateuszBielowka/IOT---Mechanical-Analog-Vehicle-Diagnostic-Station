@@ -71,6 +71,13 @@ void initialize_devices(spi_device_handle_t *max6675_handle)
   ESP_LOGI(TAG, "Devices initialized.");
 }
 
+void configure_device_defaults(void)
+{
+  bmp280_configure();
+  adxl345_configure();
+  ESP_LOGI(TAG, "Devices configured with default settings.");
+}
+
 static void init_nvs(void)
 {
   esp_err_t ret = nvs_flash_init();
@@ -152,6 +159,7 @@ void app_main(void)
   initialize_master_buses();
   spi_device_handle_t max6675_handle;
   initialize_devices(&max6675_handle);
+  configure_device_defaults();
 
   init_nvs();
 

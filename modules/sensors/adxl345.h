@@ -1,12 +1,13 @@
 #include <stdint.h>
 #include <math.h>
 #include "esp_err.h"
+#include "driver/i2c_master.h"
 #include "driver/i2c.h"
 #include "esp_log.h"
 
 // ADXL345 I2C Address (Assumes ALT ADDRESS pin is Grounded)
 #define ADXL345_PORT I2C_NUM_0
-#define I2C_FREQ_HZ 100000 // I2C Speed (100kHz)
+#define ADXL345_SPEED_HZ 100000 // I2C Speed (100kHz)
 #define ADXL345_ADDR 0x53
 // #define I2C_SCL_IO 22      // ESP32 GPIO for SCL
 // #define I2C_SDA_IO 21      // ESP32 GPIO for SDA
@@ -32,6 +33,7 @@
 #define ADXL345_EARTH_GRAVITY_MS2 8.318f
 
 esp_err_t adxl345_init(void);
+esp_err_t adxl345_delete(i2c_master_dev_handle_t dev_handle);
 esp_err_t adxl345_configure();
 
 esp_err_t adxl345_set_measurement_mode();

@@ -22,19 +22,22 @@ static float calculate_acceleration(float x, float y, float z);
 
 esp_err_t adxl345_init(void)
 {
-    uint8_t data_enable[2] = {REG_POWER_CTL, 0x08};
-    esp_err_t err = i2c_master_write_to_device(ADXL345_PORT, ADXL345_ADDR, data_enable, 2, 1000 / portTICK_PERIOD_MS);
+    i2c_device_config_t dev_config = {
+        .dev_addr_length = I2C_ADDR_BIT_LEN_7,
+        .device_address = ADXL345_ADDR,
+        .scl_speed_hz = ADXL345_SPEED_HZ,
+    };
+    i2c_master_dev_handle_t dev_handle;
+    i2c_master_bus_handle_t bus_handle;
+    ESP_ERROR_CHECK(i2c_master_get_bus_handle(0, &bus_handle));
+    ESP_ERROR_CHECK(i2c_master_bus_add_device(bus_handle, &dev_config, &dev_handle));
+    ESP_LOGI(TAG, "ADXL345 initialized on I2C address 0x%02X", ADXL345_ADDR);
+    return ESP_OK;
+}
 
-    if (err == ESP_OK)
-    {
-        ESP_LOGI(TAG, "ADXL345 Initialized successfully");
-    }
-    else
-    {
-        ESP_LOGE(TAG, "Failed to initialize ADXL345");
-    }
-
-    return err;
+esp_err_t adxl345_delete(i2c_master_dev_handle_t dev_handle)
+{
+    return i2c_master_bus_rm_device(dev_handle);
 }
 
 static esp_err_t read_register_adxl345(uint8_t reg_addr, uint8_t *data, size_t len)
