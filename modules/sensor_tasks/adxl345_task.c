@@ -8,12 +8,12 @@ void adxl345_task(void *arg)
         if (acceleration != -1.0f)
         {
             *(float *)arg = acceleration;
-            vTaskDelay(2000 / portTICK_PERIOD_MS);
+            vTaskDelay(1000);
         }
         else
         {
             printf("Failed to read ADXL345 data");
-            vTaskDelay(2000 / portTICK_PERIOD_MS);
+            vTaskDelay(1000);
         }
     }
 }

@@ -28,6 +28,8 @@ uint8_t standby = 0;      // Default standby time 1000ms
 uint8_t mode = 0;         // Default mode sleep
 uint8_t spi = 0;          // Default SPI disabled
 
+static i2c_master_dev_handle_t bmp280_handle;
+
 static esp_err_t read_register_bmp280(uint8_t reg_addr, uint8_t *data, size_t len);
 static esp_err_t write_register_bmp280(uint8_t reg_addr, uint8_t value);
 
@@ -38,35 +40,33 @@ static esp_err_t configure_config();
 static float convert_temperature(int32_t raw_temp);
 static float convert_pressure(int32_t raw_pres);
 
-esp_err_t bmp280_init(void)
+esp_err_t bmp280_init(i2c_master_bus_handle_t bus_handle)
 {
     i2c_device_config_t dev_config = {
         .dev_addr_length = I2C_ADDR_BIT_LEN_7,
         .device_address = BMP280_ADDR,
         .scl_speed_hz = BMP280_SPEED_HZ,
     };
-    i2c_master_dev_handle_t dev_handle;
-    i2c_master_bus_handle_t bus_handle;
-    ESP_ERROR_CHECK(i2c_master_get_bus_handle(0, &bus_handle));
-    ESP_ERROR_CHECK(i2c_master_bus_add_device(bus_handle, &dev_config, &dev_handle));
+
+    ESP_ERROR_CHECK(i2c_master_bus_add_device(bus_handle, &dev_config, &bmp280_handle));
     ESP_LOGI(TAG, "BMP280 initialized on I2C address 0x%02X", BMP280_ADDR);
     return ESP_OK;
 }
 
 esp_err_t bmp280_delete(i2c_master_dev_handle_t dev_handle)
 {
-    return i2c_master_bus_rm_device(dev_handle);
+    return i2c_master_bus_rm_device(bmp280_handle);
 }
 
 static esp_err_t read_register_bmp280(uint8_t reg_addr, uint8_t *data, size_t len)
 {
-    return i2c_master_write_read_device(BMP280_PORT, BMP280_ADDR, &reg_addr, 1, data, len, 1000);
+    return i2c_master_transmit_receive(bmp280_handle, &reg_addr, 1, data, len, 1000);
 }
 
 static esp_err_t write_register_bmp280(uint8_t reg_addr, uint8_t value)
 {
     uint8_t buf[2] = {reg_addr, value};
-    return i2c_master_write_to_device(BMP280_PORT, BMP280_ADDR, buf, 2, 1000);
+    return i2c_master_transmit(bmp280_handle, buf, sizeof(buf), 1000);
 }
 
 static void read_calibration_data()

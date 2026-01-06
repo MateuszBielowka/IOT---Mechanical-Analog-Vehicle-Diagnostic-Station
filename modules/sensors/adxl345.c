@@ -13,6 +13,8 @@ uint64_t activity_threshold = 0;
 uint64_t inactivity_threshold = 0;
 uint64_t inactivity_time = 60;
 
+static i2c_master_dev_handle_t adxl345_handle;
+
 static esp_err_t read_register_adxl345(uint8_t reg_addr, uint8_t *data, size_t len);
 static esp_err_t write_register_adxl345(uint8_t reg_addr, uint8_t value);
 static esp_err_t configure_power_ctrl();
@@ -20,35 +22,33 @@ static esp_err_t cofigure_bw_rate();
 static void convert_raw_data_to_ms2(int16_t rx, int16_t ry, int16_t rz, float *x, float *y, float *z);
 static float calculate_acceleration(float x, float y, float z);
 
-esp_err_t adxl345_init(void)
+esp_err_t adxl345_init(i2c_master_bus_handle_t bus_handle)
 {
     i2c_device_config_t dev_config = {
         .dev_addr_length = I2C_ADDR_BIT_LEN_7,
         .device_address = ADXL345_ADDR,
         .scl_speed_hz = ADXL345_SPEED_HZ,
     };
-    i2c_master_dev_handle_t dev_handle;
-    i2c_master_bus_handle_t bus_handle;
-    ESP_ERROR_CHECK(i2c_master_get_bus_handle(0, &bus_handle));
-    ESP_ERROR_CHECK(i2c_master_bus_add_device(bus_handle, &dev_config, &dev_handle));
+
+    ESP_ERROR_CHECK(i2c_master_bus_add_device(bus_handle, &dev_config, &adxl345_handle));
     ESP_LOGI(TAG, "ADXL345 initialized on I2C address 0x%02X", ADXL345_ADDR);
     return ESP_OK;
 }
 
 esp_err_t adxl345_delete(i2c_master_dev_handle_t dev_handle)
 {
-    return i2c_master_bus_rm_device(dev_handle);
+    return i2c_master_bus_rm_device(adxl345_handle);
 }
 
 static esp_err_t read_register_adxl345(uint8_t reg_addr, uint8_t *data, size_t len)
 {
-    return i2c_master_write_read_device(ADXL345_PORT, ADXL345_ADDR, &reg_addr, 1, data, len, 1000);
+    return i2c_master_transmit_receive(adxl345_handle, &reg_addr, 1, data, len, 1000);
 }
 
 static esp_err_t write_register_adxl345(uint8_t reg_addr, uint8_t value)
 {
     uint8_t buf[2] = {reg_addr, value};
-    return i2c_master_write_to_device(ADXL345_PORT, ADXL345_ADDR, buf, 2, 1000);
+    return i2c_master_transmit(adxl345_handle, buf, sizeof(buf), 1000);
 }
 
 static esp_err_t configure_power_ctrl()

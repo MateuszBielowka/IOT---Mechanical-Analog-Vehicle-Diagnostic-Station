@@ -1,4 +1,6 @@
 #include "adxl345.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 
 void adxl345_task(void *arg);
 

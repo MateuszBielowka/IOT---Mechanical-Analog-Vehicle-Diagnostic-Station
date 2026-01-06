@@ -9,7 +9,7 @@
 #include "esp_log.h"   // logowanie wiadomosci
 #include "nvs_flash.h" // pamiec flash
 
-#include "driver/i2c.h"        // Required for i2c_config_t, I2C_MODE_MASTER, i2c_driver_install
+#include "driver/i2c_master.h" // Required for i2c_config_t, I2C_MODE_MASTER, i2c_driver_install
 #include "driver/gpio.h"       // Required for GPIO_PULLUP_ENABLE
 #include "driver/spi_master.h" // <--- Add this include at the top
 
@@ -53,20 +53,20 @@ typedef struct
   float acceleration;
 } sensor_data_t;
 
-void initialize_master_buses(void)
+void initialize_master_buses(i2c_master_bus_handle_t *i2c_bus_0, i2c_master_bus_handle_t *i2c_bus_1)
 {
-  i2c_initialize_master(I2C_NUM_0, I2C_PORT_0_SDA_PIN, I2C_PORT_0_SCL_PIN, 100000); // BMP280 & ADXL345
-  i2c_initialize_master(I2C_NUM_1, I2C_PORT_1_SDA_PIN, I2C_PORT_1_SCL_PIN, 100000); // VEML7700
+  i2c_initialize_master(I2C_NUM_0, I2C_PORT_0_SDA_PIN, I2C_PORT_0_SCL_PIN, 100000, i2c_bus_0); // BMP280 & ADXL345
+  i2c_initialize_master(I2C_NUM_1, I2C_PORT_1_SDA_PIN, I2C_PORT_1_SCL_PIN, 100000, i2c_bus_1); // VEML7700
   ESP_LOGI(TAG, "I2C initialized.");
   spi_initialize_master(SPI2_HOST, SPI_PORT_0_MISO_PIN, SPI_PORT_0_MOSI_PIN, SPI_PORT_0_SCK_PIN); // MAX6675
   ESP_LOGI(TAG, "SPI initialized.");
 }
 
-void initialize_devices(spi_device_handle_t *max6675_handle)
+void initialize_devices(spi_device_handle_t *max6675_handle, i2c_master_bus_handle_t *i2c_handle_0, i2c_master_bus_handle_t *i2c_handle_1)
 {
-  veml7700_init();
-  bmp280_init();
-  adxl345_init();
+  veml7700_init(*i2c_handle_1);
+  bmp280_init(*i2c_handle_0);
+  adxl345_init(*i2c_handle_0);
   max6675_init(max6675_handle);
   ESP_LOGI(TAG, "Devices initialized.");
 }
@@ -156,9 +156,11 @@ void get_line_from_console(char *buffer, size_t max_len)
 
 void app_main(void)
 {
-  initialize_master_buses();
+  i2c_master_bus_handle_t i2c_bus_0;
+  i2c_master_bus_handle_t i2c_bus_1;
+  initialize_master_buses(&i2c_bus_0, &i2c_bus_1);
   spi_device_handle_t max6675_handle;
-  initialize_devices(&max6675_handle);
+  initialize_devices(&max6675_handle, &i2c_bus_0, &i2c_bus_1);
   configure_device_defaults();
 
   init_nvs();

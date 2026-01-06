@@ -1,4 +1,6 @@
-#include "driver/i2c_master.h"
+#include "bmp280.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 
 void bmp280_task(void *arg);
 

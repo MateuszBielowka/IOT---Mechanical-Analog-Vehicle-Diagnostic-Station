@@ -1,14 +1,13 @@
-#include "bmp280.h"
+#include "bmp280_task.h"
 
 void bmp280_task(void *arg)
 {
-    i2c_master_dev_handle_t dev_handle = *((i2c_master_dev_handle_t *)arg);
     float temp;
     while (1)
     {
-        bmp280_trigger_forced_mode(dev_handle);
+        bmp280_trigger_forced_mode();
         vTaskDelay(100 / portTICK_PERIOD_MS);
-        temp = bmp280_read_temp(dev_handle);
+        temp = bmp280_read_temp();
         if (temp != -1.0f)
         {
             *(float *)arg = temp;

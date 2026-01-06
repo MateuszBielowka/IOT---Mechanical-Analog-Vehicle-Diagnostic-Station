@@ -3,19 +3,21 @@
 
 static const char *TAG = "VEML7700";
 
+static i2c_master_dev_handle_t veml7700_handle;
+
 static esp_err_t write_reg(uint8_t reg, uint16_t val)
 {
     uint8_t data[3];
     data[0] = reg;
     data[1] = (uint8_t)(val & 0xFF);        // LSB
     data[2] = (uint8_t)((val >> 8) & 0xFF); // MSB
-    return i2c_master_write_to_device(VEML7700_PORT, VEML7700_ADDR, data, 3, pdMS_TO_TICKS(100));
+    return i2c_master_transmit(veml7700_handle, data, sizeof(data), 1000);
 }
 
 static esp_err_t read_reg(uint8_t reg, uint16_t *val)
 {
     uint8_t raw[2];
-    esp_err_t ret = i2c_master_write_read_device(VEML7700_PORT, VEML7700_ADDR, &reg, 1, raw, 2, pdMS_TO_TICKS(100));
+    esp_err_t ret = i2c_master_transmit_receive(veml7700_handle, &reg, 1, raw, 2, 1000);
     if (ret == ESP_OK)
     {
         *val = (uint16_t)raw[0] | ((uint16_t)raw[1] << 8);
@@ -23,24 +25,22 @@ static esp_err_t read_reg(uint8_t reg, uint16_t *val)
     return ret;
 }
 
-esp_err_t veml7700_init(void)
+esp_err_t veml7700_init(i2c_master_bus_handle_t bus_handle)
 {
     i2c_device_config_t dev_config = {
         .dev_addr_length = I2C_ADDR_BIT_LEN_7,
         .device_address = VEML7700_ADDR,
         .scl_speed_hz = VEML7700_SPEED_HZ,
     };
-    i2c_master_dev_handle_t dev_handle;
-    i2c_master_bus_handle_t bus_handle;
-    ESP_ERROR_CHECK(i2c_master_get_bus_handle(0, &bus_handle));
-    ESP_ERROR_CHECK(i2c_master_bus_add_device(bus_handle, &dev_config, &dev_handle));
+
+    ESP_ERROR_CHECK(i2c_master_bus_add_device(bus_handle, &dev_config, &veml7700_handle));
     ESP_LOGI(TAG, "VEML7700 initialized on I2C address 0x%02X", VEML7700_ADDR);
     return ESP_OK;
 }
 
 esp_err_t veml7700_delete(i2c_master_dev_handle_t dev_handle)
 {
-    return i2c_master_bus_rm_device(dev_handle);
+    return i2c_master_bus_rm_device(veml7700_handle);
 }
 
 static float convert_raw_data(uint16_t raw_counts)

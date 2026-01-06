@@ -1,7 +1,6 @@
 #include <stdio.h>
 #include "driver/i2c_master.h"
 #include "driver/uart.h"
-#include "driver/i2c.h"
 #include "esp_log.h"
 
 #define BMP280_PORT I2C_NUM_0  /*!< I2C port number for BMP280 sensor */
@@ -21,7 +20,7 @@
  * @param speed The I2C clock line frequency of this device
  * @return **i2c_master_dev_handle_t**  - The device handle
  */
-esp_err_t bmp280_init(void);
+esp_err_t bmp280_init(i2c_master_bus_handle_t bus_handle);
 /**
  * @brief Delete the BMP280 device from the I2C bus to release the underlying hardware (reccommended to remove all attached
  * devices before deleting the bus).

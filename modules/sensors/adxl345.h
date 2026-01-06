@@ -2,7 +2,6 @@
 #include <math.h>
 #include "esp_err.h"
 #include "driver/i2c_master.h"
-#include "driver/i2c.h"
 #include "esp_log.h"
 
 // ADXL345 I2C Address (Assumes ALT ADDRESS pin is Grounded)
@@ -32,7 +31,7 @@
 #define ADXL345_Y_AXIS_CORRECTION -2.205f
 #define ADXL345_EARTH_GRAVITY_MS2 8.318f
 
-esp_err_t adxl345_init(void);
+esp_err_t adxl345_init(i2c_master_bus_handle_t bus_handle);
 esp_err_t adxl345_delete(i2c_master_dev_handle_t dev_handle);
 esp_err_t adxl345_configure();
 

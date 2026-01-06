@@ -1,7 +1,6 @@
 #include <esp_err.h>
 #include <math.h>
 #include "driver/i2c_master.h"
-#include "driver/i2c.h"
 #include "esp_log.h"
 
 #define VEML7700_PORT I2C_NUM_1 /*!< I2C port number for VEML7700 sensor */
@@ -28,7 +27,7 @@
  * @param scl_pin GPIO pin for Clock
  * @return esp_err_t ESP_OK on success
  */
-esp_err_t veml7700_init();
+esp_err_t veml7700_init(i2c_master_bus_handle_t bus_handle);
 
 /**
  * @brief Delete the VEML7700 device from the I2C bus to release the underlying hardware.

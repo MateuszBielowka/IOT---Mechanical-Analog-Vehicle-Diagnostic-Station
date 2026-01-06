@@ -2,6 +2,8 @@
 
 static const char *TAG = "MAX6675";
 
+spi_device_handle_t max6675_handle;
+
 esp_err_t max6675_init(spi_device_handle_t *dev_handle)
 {
     spi_device_interface_config_t devcfg = {
@@ -11,14 +13,14 @@ esp_err_t max6675_init(spi_device_handle_t *dev_handle)
         .queue_size = 1,
     };
 
-    ESP_ERROR_CHECK(spi_bus_add_device(SPI2_HOST, &devcfg, dev_handle));
+    ESP_ERROR_CHECK(spi_bus_add_device(SPI2_HOST, &devcfg, &max6675_handle));
     ESP_LOGI(TAG, "device added to SPI bus");
     return ESP_OK;
 }
 
 esp_err_t max6675_delete(spi_device_handle_t dev_handle)
 {
-    return spi_bus_remove_device(dev_handle);
+    return spi_bus_remove_device(max6675_handle);
 }
 
 static bool check_open_thermocouple(uint16_t value)
