@@ -3,13 +3,15 @@
 #include "esp_gatts_api.h"
 
 #define TAG "BLE_SERVER"
-#define DEVICE_NAME "ESP32_CONFIG"
+#define DEVICE_NAME "ESP32-NotesWiFi"
 
 // --- UUID Definicje ---
 #define SERVICE_UUID        0x00FF
 #define CHAR_NOTES_UUID     0xFF01
 #define CHAR_SSID_UUID      0xFF02
 #define CHAR_PASS_UUID      0xFF03
+#define CHAR_WIFI_SWITCH_UUID   0xFF04
+#define ESP_GATT_UUID_CHAR_DESCRIPTION  0x2901
 
 #define PROFILE_APP_ID      0
 
