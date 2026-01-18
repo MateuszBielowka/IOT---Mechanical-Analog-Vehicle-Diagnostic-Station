@@ -5,6 +5,7 @@
         "."
     REQUIRES
         sensors
+        sensor_tasks
         storage
         buzzer
     PRIV_REQUIRES

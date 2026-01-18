@@ -1,12 +1,4 @@
-#include "project_config.h"
-
-#include <stdio.h>
-#include "freertos/FreeRTOS.h"
-#include "freertos/task.h"
-#include "esp_log.h"
-#include "hcsr04_driver.h"
-#include "esp_timer.h"
-#include "buzzer.h"
+#include "hcsr04.h"
 
 void hcsr04_task(void *arg)
 {
@@ -20,7 +12,6 @@ void hcsr04_task(void *arg)
     bool medium_mode = false;
     bool fast_mode = false;
     int64_t fast_mode_start_time = 0;
-
 
     while (1)
     {
@@ -42,7 +33,7 @@ void hcsr04_task(void *arg)
                 fast_mode = true;
                 fast_mode_start_time = esp_timer_get_time();
 
-                // buzzer_enable_park(true);
+                buzzer_enable_park(true);
             }
         }
         else
@@ -60,7 +51,7 @@ void hcsr04_task(void *arg)
                 fast_mode = false;
                 success_count = 0;
 
-                // buzzer_enable_park(false);
+                buzzer_enable_park(false);
             }
         }
 
@@ -75,5 +66,5 @@ void hcsr04_task(void *arg)
 
 void hcsr04_start_task(float *parameter)
 {
-    xTaskCreate(hcsr04_task, "HSRC04 task", 8192, parameter, 4, NULL);
+    xTaskCreate(hcsr04_task, "HSRC04 task", 8192, parameter, 10, NULL);
 }

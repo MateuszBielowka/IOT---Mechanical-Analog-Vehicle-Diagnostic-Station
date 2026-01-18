@@ -1,169 +1,302 @@
-#include "project_config.h"
-
-/* bmp280.c */
 #include "bmp280.h"
-#include "driver/i2c.h"
-#include "esp_log.h"
-#include <math.h>
+
+typedef struct
+{
+    uint16_t dig_T1;
+    int16_t dig_T2;
+    int16_t dig_T3;
+    uint16_t dig_P1;
+    int16_t dig_P2;
+    int16_t dig_P3;
+    int16_t dig_P4;
+    int16_t dig_P5;
+    int16_t dig_P6;
+    int16_t dig_P7;
+    int16_t dig_P8;
+    int16_t dig_P9;
+} bmp280_calib_data_t;
+
+bmp280_calib_data_t cal_data; // Global instance
+static int32_t t_fine;
 
 static const char *TAG = "BMP280";
 
-/* Configuration */
-#define I2C_MASTER_NUM I2C_NUM_0
-#define I2C_MASTER_FREQ_HZ 100000
-#define BMP280_ADDR 0x76 // Change to 0x77 if 0x76 doesn't work!
+uint8_t filter_value = 0; // Default filter coefficient
+uint8_t osrs_t = 1;       // Default temperature oversampling x1
+uint8_t osrs_p = 1;       // Default pressure oversampling x1
+uint8_t standby = 0;      // Default standby time 1000ms
+uint8_t mode = 0;         // Default mode sleep
+uint8_t spi = 0;          // Default SPI disabled
 
-/* Registers */
-#define REG_DIG_T1 0x88
-#define REG_ID 0xD0
-#define REG_CTRL_MEAS 0xF4
-#define REG_CONFIG 0xF5
-#define REG_PRESS_MSB 0xF7
+static i2c_master_dev_handle_t bmp280_handle;
 
-/* Calibration Data (Stored globally for simplicity) */
-static uint16_t dig_T1;
-static int16_t dig_T2, dig_T3;
-static uint16_t dig_P1;
-static int16_t dig_P2, dig_P3, dig_P4, dig_P5, dig_P6, dig_P7, dig_P8, dig_P9;
-static int32_t t_fine;
+static esp_err_t read_register_bmp280(uint8_t reg_addr, uint8_t *data, size_t len);
+static esp_err_t write_register_bmp280(uint8_t reg_addr, uint8_t value);
 
-/* I2C Helper Functions */
-static esp_err_t read_regs(uint8_t reg, uint8_t *data, size_t len)
+static void read_calibration_data();
+static esp_err_t configure_ctrl_meas();
+static esp_err_t configure_config();
+
+static float convert_temperature(int32_t raw_temp);
+static float convert_pressure(int32_t raw_pres);
+
+esp_err_t bmp280_init(i2c_master_bus_handle_t bus_handle)
 {
-    return i2c_master_write_read_device(I2C_MASTER_NUM, BMP280_ADDR, &reg, 1, data, len, pdMS_TO_TICKS(100));
-}
+    i2c_device_config_t dev_config = {
+        .dev_addr_length = I2C_ADDR_BIT_LEN_7,
+        .device_address = BMP280_ADDR,
+        .scl_speed_hz = BMP280_SPEED_HZ,
+    };
 
-static esp_err_t write_reg(uint8_t reg, uint8_t val)
-{
-    uint8_t data[] = {reg, val};
-    return i2c_master_write_to_device(I2C_MASTER_NUM, BMP280_ADDR, data, 2, pdMS_TO_TICKS(100));
-}
-
-static void parse_calibration_data(uint8_t *reg_data)
-{
-    dig_T1 = (reg_data[1] << 8) | reg_data[0];
-    dig_T2 = (int16_t)((reg_data[3] << 8) | reg_data[2]);
-    dig_T3 = (int16_t)((reg_data[5] << 8) | reg_data[4]);
-    dig_P1 = (reg_data[7] << 8) | reg_data[6];
-    dig_P2 = (int16_t)((reg_data[9] << 8) | reg_data[8]);
-    dig_P3 = (int16_t)((reg_data[11] << 8) | reg_data[10]);
-    dig_P4 = (int16_t)((reg_data[13] << 8) | reg_data[12]);
-    dig_P5 = (int16_t)((reg_data[15] << 8) | reg_data[14]);
-    dig_P6 = (int16_t)((reg_data[17] << 8) | reg_data[16]);
-    dig_P7 = (int16_t)((reg_data[19] << 8) | reg_data[18]);
-    dig_P8 = (int16_t)((reg_data[21] << 8) | reg_data[20]);
-    dig_P9 = (int16_t)((reg_data[23] << 8) | reg_data[22]);
-}
-
-/* Public API Implementation */
-
-esp_err_t bmp280_setup(int sda_pin, int scl_pin)
-{
-
-    // 2. Check Device ID
-    uint8_t id = 0;
-    if (read_regs(REG_ID, &id, 1) != ESP_OK)
-    {
-        ESP_LOGE(TAG, "Sensor not found at 0x%X", BMP280_ADDR);
-        return ESP_FAIL;
-    }
-    ESP_LOGI(TAG, "Found BMP280, ID: 0x%02X", id);
-
-    // 3. Read Calibration
-    uint8_t cal_data[24];
-    if (read_regs(REG_DIG_T1, cal_data, 24) != ESP_OK)
-        return ESP_FAIL;
-    parse_calibration_data(cal_data);
-
-    // 4. Configure: Normal Mode, Temp Oversampling x2, Pressure Oversampling x16
-    write_reg(REG_CONFIG, 0xA0);    // Standby 1000ms, Filter off
-    write_reg(REG_CTRL_MEAS, 0x57); // osrs_t x2, osrs_p x16, normal mode
-
+    ESP_ERROR_CHECK(i2c_master_bus_add_device(bus_handle, &dev_config, &bmp280_handle));
+    ESP_LOGI(TAG, "BMP280 initialized on I2C address 0x%02X", BMP280_ADDR);
     return ESP_OK;
 }
 
-esp_err_t take_measurement(float *temperature, float *pressure)
+esp_err_t bmp280_delete(i2c_master_dev_handle_t dev_handle)
 {
-    uint8_t raw_data[6];
+    return i2c_master_bus_rm_device(bmp280_handle);
+}
 
-    // Read Pressure (msb, lsb, xlsb) and Temp (msb, lsb, xlsb)
-    if (read_regs(REG_PRESS_MSB, raw_data, 6) != ESP_OK)
-        return ESP_FAIL;
+static esp_err_t read_register_bmp280(uint8_t reg_addr, uint8_t *data, size_t len)
+{
+    return i2c_master_transmit_receive(bmp280_handle, &reg_addr, 1, data, len, 1000);
+}
 
-    int32_t adc_P = (raw_data[0] << 12) | (raw_data[1] << 4) | (raw_data[2] >> 4);
-    int32_t adc_T = (raw_data[3] << 12) | (raw_data[4] << 4) | (raw_data[5] >> 4);
+static esp_err_t write_register_bmp280(uint8_t reg_addr, uint8_t value)
+{
+    uint8_t buf[2] = {reg_addr, value};
+    return i2c_master_transmit(bmp280_handle, buf, sizeof(buf), 1000);
+}
 
-    // --- Compensate Temperature ---
+static void read_calibration_data()
+{
+    uint8_t reg_addr = 0x88;
+    uint8_t raw_data[24];
+
+    // Write register address 0x88, then read 24 bytes
+    write_register_bmp280(reg_addr, 0);
+    read_register_bmp280(reg_addr, raw_data, 24);
+
+    // Parse data (LSB first)
+    cal_data.dig_T1 = (raw_data[1] << 8) | raw_data[0];
+    cal_data.dig_T2 = (int16_t)((raw_data[3] << 8) | raw_data[2]);
+    cal_data.dig_T3 = (int16_t)((raw_data[5] << 8) | raw_data[4]);
+
+    cal_data.dig_P1 = (raw_data[7] << 8) | raw_data[6];
+    cal_data.dig_P2 = (int16_t)((raw_data[9] << 8) | raw_data[8]);
+    cal_data.dig_P3 = (int16_t)((raw_data[11] << 8) | raw_data[10]);
+    cal_data.dig_P4 = (int16_t)((raw_data[13] << 8) | raw_data[12]);
+    cal_data.dig_P5 = (int16_t)((raw_data[15] << 8) | raw_data[14]);
+    cal_data.dig_P6 = (int16_t)((raw_data[17] << 8) | raw_data[16]);
+    cal_data.dig_P7 = (int16_t)((raw_data[19] << 8) | raw_data[18]);
+    cal_data.dig_P8 = (int16_t)((raw_data[21] << 8) | raw_data[20]);
+    cal_data.dig_P9 = (int16_t)((raw_data[23] << 8) | raw_data[22]);
+}
+
+static esp_err_t configure_ctrl_meas()
+{
+    uint8_t ctrl_meas = (osrs_t << 5) | (osrs_p << 2) | mode;
+    return write_register_bmp280(REG_CTRL_MEAS, ctrl_meas);
+}
+
+static esp_err_t configure_config()
+{
+    uint8_t config = (standby << 5) | (filter_value << 2) | spi;
+    return write_register_bmp280(REG_CONFIG, config);
+}
+
+esp_err_t bmp280_configure()
+{
+    read_calibration_data();
+    esp_err_t err = configure_ctrl_meas();
+    if (err != ESP_OK)
+    {
+        ESP_LOGE(TAG, "Failed to write ctrl_meas: %s", esp_err_to_name(err));
+        return err;
+    }
+    err = configure_config();
+    if (err != ESP_OK)
+    {
+        ESP_LOGE(TAG, "Failed to write config: %s", esp_err_to_name(err));
+        return err;
+    }
+    return ESP_OK;
+}
+
+esp_err_t bmp280_trigger_normal_mode()
+{
+    mode = 3; // Set mode to normal
+    esp_err_t err = configure_ctrl_meas();
+
+    if (err != ESP_OK)
+    {
+        ESP_LOGE(TAG, "Failed to trigger normal mode: %s", esp_err_to_name(err));
+        return err;
+    }
+    return ESP_OK;
+}
+
+esp_err_t bmp280_trigger_forced_mode()
+{
+    mode = 1; // Set mode to forced
+    esp_err_t err = configure_ctrl_meas();
+
+    if (err != ESP_OK)
+    {
+        ESP_LOGE(TAG, "Failed to trigger forced mode: %s", esp_err_to_name(err));
+        return err;
+    }
+    return ESP_OK;
+}
+
+esp_err_t bmp280_trigger_sleep_mode()
+{
+    mode = 0; // Set mode to sleep
+    esp_err_t err = configure_ctrl_meas();
+
+    if (err != ESP_OK)
+    {
+        ESP_LOGE(TAG, "Failed to trigger sleep mode: %s", esp_err_to_name(err));
+        return err;
+    }
+    return ESP_OK;
+}
+
+float bmp280_read_temp()
+{
+    uint8_t data[3];
+    esp_err_t err = read_register_bmp280(BMP280_TEMP_MSB, data, 3);
+
+    while (1)
+    {
+        uint8_t status;
+        read_register_bmp280(BMP280_REG_STATUS, &status, 1);
+        if ((status & 0x08) == 0)
+        {          // Bit 3 is 'measuring'
+            break; // Measurement finished
+        }
+        vTaskDelay(2 / portTICK_PERIOD_MS); // Wait a bit
+    }
+
+    if (err != ESP_OK)
+    {
+        ESP_LOGE(TAG, "Error reading temperature data: %s", esp_err_to_name(err));
+        return -1.0f;
+    }
+    int32_t raw_temperature = (int32_t)((data[0] << 12) | (data[1] << 4) | (data[2] >> 4));
+    float temperature = convert_temperature(raw_temperature);
+    // printf("Temperature: %.2f °C\n", temperature);
+    // return ESP_OK;
+    return temperature;
+}
+
+float bmp280_read_pres()
+{
+    uint8_t data[6];
+    esp_err_t err = read_register_bmp280(BMP280_PRES_MSB, data, 6);
+
+    while (1)
+    {
+        uint8_t status;
+        read_register_bmp280(BMP280_REG_STATUS, &status, 1);
+        if ((status & 0x08) == 0)
+        {          // Bit 3 is 'measuring'
+            break; // Measurement finished
+        }
+        vTaskDelay(2 / portTICK_PERIOD_MS); // Wait a bit
+    }
+
+    if (err != ESP_OK)
+    {
+        ESP_LOGE(TAG, "Error reading pressure data: %s", esp_err_to_name(err));
+        return -1.0f;
+    }
+    int32_t raw_pressure = (int32_t)((data[0] << 12) | (data[1] << 4) | (data[2] >> 4));
+    int32_t raw_temp = (int32_t)((data[3] << 12) | (data[4] << 4) | (data[5] >> 4));
+    float temperature = convert_temperature(raw_temp);
+    float pressure = convert_pressure(raw_pressure);
+    // printf("Pressure: %.2f hPa\n", pressure);
+    // return ESP_OK;
+    return pressure;
+}
+
+esp_err_t bmp280_trigger_filter(uint8_t filter)
+{
+    filter_value = filter;
+    esp_err_t err = configure_config();
+
+    if (err != ESP_OK)
+    {
+        ESP_LOGE(TAG, "Failed to trigger filter: %s", esp_err_to_name(err));
+        return err;
+    }
+    return ESP_OK;
+}
+
+esp_err_t bmp280_change_temp_resolution(uint8_t resolution)
+{
+    osrs_t = resolution;
+    esp_err_t err = configure_ctrl_meas();
+    if (err != ESP_OK)
+    {
+        ESP_LOGE(TAG, "Failed to change temperature resolution: %s", esp_err_to_name(err));
+        return err;
+    }
+    return ESP_OK;
+}
+
+esp_err_t bmp280_change_pres_resolution(uint8_t resolution)
+{
+    osrs_p = resolution;
+    esp_err_t err = configure_ctrl_meas();
+    if (err != ESP_OK)
+    {
+        ESP_LOGE(TAG, "Failed to change pressure resolution: %s", esp_err_to_name(err));
+        return err;
+    }
+    return ESP_OK;
+}
+
+esp_err_t bmp280_change_standby_time(uint8_t time)
+{
+    standby = time;
+    esp_err_t err = configure_config();
+    if (err != ESP_OK)
+    {
+        ESP_LOGE(TAG, "Failed to change standby time: %s", esp_err_to_name(err));
+        return err;
+    }
+    return ESP_OK;
+}
+
+static float convert_temperature(int32_t raw_temp)
+{
     int32_t var1, var2;
-    var1 = ((((adc_T >> 3) - ((int32_t)dig_T1 << 1))) * ((int32_t)dig_T2)) >> 11;
-    var2 = (((((adc_T >> 4) - ((int32_t)dig_T1)) * ((adc_T >> 4) - ((int32_t)dig_T1))) >> 12) * ((int32_t)dig_T3)) >> 14;
+    var1 = ((((raw_temp >> 3) - ((int32_t)cal_data.dig_T1 << 1))) * ((int32_t)cal_data.dig_T2)) >> 11;
+    var2 = (((((raw_temp >> 4) - ((int32_t)cal_data.dig_T1)) * ((raw_temp >> 4) - ((int32_t)cal_data.dig_T1))) >> 12) * ((int32_t)cal_data.dig_T3)) >> 14;
     t_fine = var1 + var2;
-
-    if (temperature)
-    {
-        *temperature = ((t_fine * 5 + 128) >> 8) / 100.0f;
-    }
-
-    // --- Compensate Pressure ---
-    if (pressure)
-    {
-        int64_t p_var1, p_var2, p;
-        p_var1 = (int64_t)t_fine - 128000;
-        p_var2 = p_var1 * p_var1 * (int64_t)dig_P6;
-        p_var2 = p_var2 + ((p_var1 * (int64_t)dig_P5) << 17);
-        p_var2 = p_var2 + (((int64_t)dig_P4) << 35);
-        p_var1 = ((p_var1 * p_var1 * (int64_t)dig_P3) >> 8) + ((p_var1 * (int64_t)dig_P2) << 12);
-        p_var1 = (((((int64_t)1) << 47) + p_var1)) * ((int64_t)dig_P1) >> 33;
-
-        if (p_var1 == 0)
-        {
-            *pressure = 0; // Avoid divide by zero
-        }
-        else
-        {
-            p = 1048576 - adc_P;
-            p = (((p << 31) - p_var2) * 3125) / p_var1;
-            p_var1 = (((int64_t)dig_P9) * (p >> 13) * (p >> 13)) >> 25;
-            p_var2 = (((int64_t)dig_P8) * p) >> 19;
-            p = ((p + p_var1 + p_var2) >> 8) + (((int64_t)dig_P7) << 4);
-            *pressure = (float)p / 256.0f;
-        }
-    }
-    return ESP_OK;
+    int32_t T = (t_fine * 5 + 128) >> 8;
+    return (float)T / 100.0;
 }
 
-void bmp280_task(void *arg)
+static float convert_pressure(int32_t raw_pres)
 {
-    while (1)
+    int64_t var1, var2, p;
+    var1 = ((int64_t)t_fine) - 128000;
+    var2 = var1 * var1 * (int64_t)cal_data.dig_P6;
+    var2 = var2 + ((var1 * (int64_t)cal_data.dig_P5) << 17);
+    var2 = var2 + ((int64_t)cal_data.dig_P4 << 35);
+    var1 = ((var1 * var1 * (int64_t)cal_data.dig_P3) >> 8) + ((var1 * (int64_t)cal_data.dig_P2) << 12);
+    var1 = (((((int64_t)1) << 47) + var1) * (int64_t)cal_data.dig_P1) >> 33;
+    if (var1 == 0)
     {
-        ESP_LOGI(TAG, "Initializing BMP280...");
-        if (bmp280_setup(GPIO_NUM_21, GPIO_NUM_22) == ESP_OK)
-        {
-            break;
-        }
-        else
-        {
-            ESP_LOGE(TAG, "BMP280 Initialization Failed. Retrying in 5 seconds...");
-            vTaskDelay(pdMS_TO_TICKS(5000));
-        }
+        return 0; // avoid exception caused by division by zero
     }
-    while (1)
-    {
-        float temperature = 0.0f, pressure = 0.0f;
-        if (take_measurement(&temperature, &pressure) == ESP_OK)
-        {
-            *(float*)arg = temperature;
-            vTaskDelay(pdMS_TO_TICKS(BMP280_MEASUREMENT_INTERVAL_MS));
-        }
-        else
-        {
-            ESP_LOGE(TAG, "Measurement failed");
-            vTaskDelay(pdMS_TO_TICKS(INCORRECT_MEASUREMENT_INTERVAL_MS));
-        }
-    }
-}
-
-void bmp280_start_task(float *parameter)
-{
-    xTaskCreate(bmp280_task, "BMP280_Task", 4096, parameter, 10, NULL);
+    p = 1048576 - raw_pres;
+    p = (((p << 31) - var2) * 3125) / var1;
+    var1 = (((int64_t)cal_data.dig_P9) * (p >> 13) * (p >> 13)) >> 25;
+    var2 = (((int64_t)cal_data.dig_P8) * p) >> 19;
+    p = ((p + var1 + var2) >> 8) + (((int64_t)cal_data.dig_P7) << 4);
+    return (float)p / 256.0 / 100.0;
 }
