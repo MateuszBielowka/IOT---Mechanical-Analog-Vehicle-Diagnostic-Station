@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <stddef.h>
+#include <stdatomic.h>
 #include "esp_log.h"
 #include "nvs_flash.h"
 #include "nvs.h"
@@ -19,6 +20,30 @@ static uint16_t s_char_notes_handle;
 static uint16_t s_char_ssid_handle;
 static uint16_t s_char_pass_handle;
 static uint16_t s_char_wifi_switch_handle;
+static uint16_t s_char_hcsr04_ctrl_handle;
+static uint16_t s_char_hcsr04_data_handle;
+static uint16_t s_char_hcsr04_cccd_handle;
+
+static _Atomic bool s_hcsr04_streaming_enabled = false;
+static _Atomic bool s_hcsr04_ctrl_wants_stream = false; // Track CTRL='1' write (user wants streaming)
+static _Atomic bool s_hcsr04_notifications_enabled = false; // Track CCCD notification state
+static bool s_is_connected = false;
+static esp_gatt_if_t s_gatts_if = ESP_GATT_IF_NONE;
+static uint16_t s_conn_id = 0;
+
+typedef enum
+{
+    STAGE_NONE = 0,
+    STAGE_NOTES_DESC_ADDED,
+    STAGE_SSID_DESC_ADDED,
+    STAGE_PASS_DESC_ADDED,
+    STAGE_WIFI_SWITCH_DESC_ADDED,
+    STAGE_HCSR04_CTRL_DESC_ADDED,
+    STAGE_HCSR04_DATA_DESC_ADDED,
+    STAGE_HCSR04_DATA_CCCD_ADDED,
+} ble_gatt_build_stage_t;
+
+static ble_gatt_build_stage_t s_build_stage = STAGE_NONE;
 
 static esp_ble_adv_params_t adv_params = {
     .adv_int_min        = 0x20,
@@ -63,6 +88,30 @@ static void add_user_description(uint16_t service_handle, const char* name) {
                                  &control);
 }
 
+static void add_cccd(uint16_t service_handle)
+{
+    esp_bt_uuid_t descr_uuid;
+    descr_uuid.len = ESP_UUID_LEN_16;
+    descr_uuid.uuid.uuid16 = ESP_GATT_UUID_CHAR_CLIENT_CONFIG;
+
+    // Default: notifications disabled (0x0000)
+    static uint8_t cccd_val[2] = {0x00, 0x00};
+    esp_attr_value_t descr_val = {
+        .attr_max_len = sizeof(cccd_val),
+        .attr_len = sizeof(cccd_val),
+        .attr_value = cccd_val,
+    };
+
+    esp_attr_control_t control;
+    control.auto_rsp = ESP_GATT_AUTO_RSP;
+
+    esp_ble_gatts_add_char_descr(service_handle,
+                                 &descr_uuid,
+                                 ESP_GATT_PERM_READ | ESP_GATT_PERM_WRITE,
+                                 &descr_val,
+                                 &control);
+}
+
 // --- GŁÓWNY HANDLER ---
 void gatts_profile_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_if, esp_ble_gatts_cb_param_t *param) {
     switch (event) {
@@ -76,8 +125,8 @@ void gatts_profile_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_t gatts
             service_id.id.uuid.len = ESP_UUID_LEN_16;
             service_id.id.uuid.uuid.uuid16 = SERVICE_UUID; // Zakładam, że SERVICE_UUID jest w ble_internal.h
 
-            // Zwiększamy liczbę uchwytów (1 serwis + 4 chary * 2 uchwyty = 9 -> dajemy z zapasem 16)
-            esp_ble_gatts_create_service(gatts_if, &service_id, 16);
+            // Add extra attributes for additional characteristics + descriptors
+            esp_ble_gatts_create_service(gatts_if, &service_id, 32);
             break;
         }
 
@@ -102,44 +151,90 @@ void gatts_profile_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_t gatts
             if (added_uuid == CHAR_NOTES_UUID) {
                 s_char_notes_handle = param->add_char.attr_handle;
                 add_user_description(s_service_handle, "Notatki");
+                s_build_stage = STAGE_NOTES_DESC_ADDED;
             } 
             else if (added_uuid == CHAR_SSID_UUID) {
                 s_char_ssid_handle = param->add_char.attr_handle;
                 add_user_description(s_service_handle, "WiFi SSID");
+                s_build_stage = STAGE_SSID_DESC_ADDED;
             } 
             else if (added_uuid == CHAR_PASS_UUID) {
                 s_char_pass_handle = param->add_char.attr_handle;
                 add_user_description(s_service_handle, "WiFi Password");
+                s_build_stage = STAGE_PASS_DESC_ADDED;
             }
             else if (added_uuid == CHAR_WIFI_SWITCH_UUID) {
                 s_char_wifi_switch_handle = param->add_char.attr_handle;
                 add_user_description(s_service_handle, "WiFi ON/OFF (1=ON, 0=OFF)");
+                s_build_stage = STAGE_WIFI_SWITCH_DESC_ADDED;
+            }
+            else if (added_uuid == CHAR_HCSR04_CTRL_UUID) {
+                s_char_hcsr04_ctrl_handle = param->add_char.attr_handle;
+                add_user_description(s_service_handle, "HCSR04 stream control (1=start, 0=stop)");
+                s_build_stage = STAGE_HCSR04_CTRL_DESC_ADDED;
+            }
+            else if (added_uuid == CHAR_HCSR04_DATA_UUID) {
+                s_char_hcsr04_data_handle = param->add_char.attr_handle;
+                add_user_description(s_service_handle, "HCSR04 distance_cm (uint16, notify)");
+                s_build_stage = STAGE_HCSR04_DATA_DESC_ADDED;
             }
             break;
         }
 
         // 4. ŁAŃCUCH TWORZENIA: OPIS DODANY -> DODAJ NASTĘPNĄ CHARAKTERYSTYKĘ
         case ESP_GATTS_ADD_CHAR_DESCR_EVT: {
-            // Mamy Notatki -> Dodaj SSID
-            if (s_char_notes_handle != 0 && s_char_ssid_handle == 0) {
-                esp_bt_uuid_t uuid = { .len = ESP_UUID_LEN_16, .uuid.uuid16 = CHAR_SSID_UUID };
+            const uint16_t descr_uuid = param->add_char_descr.descr_uuid.uuid.uuid16;
+            const uint16_t descr_handle = param->add_char_descr.attr_handle;
+
+            if (descr_uuid == ESP_GATT_UUID_CHAR_CLIENT_CONFIG)
+            {
+                s_char_hcsr04_cccd_handle = descr_handle;
+                s_build_stage = STAGE_HCSR04_DATA_CCCD_ADDED;
+            }
+
+            // Drive the build chain using the stage, not "which handle is non-zero",
+            // because HCSR04_DATA adds *two* descriptors (2901 + 2902).
+            if (s_build_stage == STAGE_NOTES_DESC_ADDED)
+            {
+                esp_bt_uuid_t uuid = {.len = ESP_UUID_LEN_16, .uuid.uuid16 = CHAR_SSID_UUID};
                 esp_ble_gatts_add_char(s_service_handle, &uuid, ESP_GATT_PERM_WRITE, ESP_GATT_CHAR_PROP_BIT_WRITE, NULL, NULL);
             }
-            // Mamy SSID -> Dodaj PASS
-            else if (s_char_ssid_handle != 0 && s_char_pass_handle == 0) {
-                esp_bt_uuid_t uuid = { .len = ESP_UUID_LEN_16, .uuid.uuid16 = CHAR_PASS_UUID };
+            else if (s_build_stage == STAGE_SSID_DESC_ADDED)
+            {
+                esp_bt_uuid_t uuid = {.len = ESP_UUID_LEN_16, .uuid.uuid16 = CHAR_PASS_UUID};
                 esp_ble_gatts_add_char(s_service_handle, &uuid, ESP_GATT_PERM_WRITE, ESP_GATT_CHAR_PROP_BIT_WRITE, NULL, NULL);
             }
-            // Mamy PASS -> Dodaj SWITCH
-            else if (s_char_pass_handle != 0 && s_char_wifi_switch_handle == 0) {
-                esp_bt_uuid_t uuid = { .len = ESP_UUID_LEN_16, .uuid.uuid16 = CHAR_WIFI_SWITCH_UUID };
-                // Switch ma WRITE (sterowanie) i opcjonalnie READ
-                esp_ble_gatts_add_char(s_service_handle, &uuid, 
-                                       ESP_GATT_PERM_WRITE, 
-                                       ESP_GATT_CHAR_PROP_BIT_WRITE, NULL, NULL);
+            else if (s_build_stage == STAGE_PASS_DESC_ADDED)
+            {
+                esp_bt_uuid_t uuid = {.len = ESP_UUID_LEN_16, .uuid.uuid16 = CHAR_WIFI_SWITCH_UUID};
+                esp_ble_gatts_add_char(s_service_handle, &uuid,
+                                       ESP_GATT_PERM_WRITE,
+                                       ESP_GATT_CHAR_PROP_BIT_WRITE,
+                                       NULL, NULL);
             }
-            // Mamy wszystko -> Start Serwisu
-            else if (s_char_wifi_switch_handle != 0) {
+            else if (s_build_stage == STAGE_WIFI_SWITCH_DESC_ADDED)
+            {
+                esp_bt_uuid_t uuid = {.len = ESP_UUID_LEN_16, .uuid.uuid16 = CHAR_HCSR04_CTRL_UUID};
+                esp_ble_gatts_add_char(s_service_handle, &uuid,
+                                       ESP_GATT_PERM_WRITE,
+                                       ESP_GATT_CHAR_PROP_BIT_WRITE | ESP_GATT_CHAR_PROP_BIT_WRITE_NR,
+                                       NULL, NULL);
+            }
+            else if (s_build_stage == STAGE_HCSR04_CTRL_DESC_ADDED)
+            {
+                esp_bt_uuid_t uuid = {.len = ESP_UUID_LEN_16, .uuid.uuid16 = CHAR_HCSR04_DATA_UUID};
+                esp_ble_gatts_add_char(s_service_handle, &uuid,
+                                       ESP_GATT_PERM_READ,
+                                       ESP_GATT_CHAR_PROP_BIT_READ | ESP_GATT_CHAR_PROP_BIT_NOTIFY,
+                                       NULL, NULL);
+            }
+            else if (s_build_stage == STAGE_HCSR04_DATA_DESC_ADDED)
+            {
+                // After 0x2901 description for DATA, add CCCD (0x2902) so the phone can enable notifications.
+                add_cccd(s_service_handle);
+            }
+            else if (s_build_stage == STAGE_HCSR04_DATA_CCCD_ADDED)
+            {
                 esp_ble_gatts_start_service(s_service_handle);
             }
             break;
@@ -245,19 +340,88 @@ void gatts_profile_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_t gatts
                         ESP_LOGI(TAG, "WiFi zatrzymane.");
                     }
                 }
+                else if (param->write.handle == s_char_hcsr04_ctrl_handle) {
+                    char command = buffer[0];
+                    ESP_LOGI(TAG, "HCSR04 stream ctrl: %c", command);
+                    
+                    // Update CTRL state: '1' = user wants streaming, '0' = user wants to stop
+                    bool ctrl_wants_stream = (command == '1');
+                    atomic_store(&s_hcsr04_ctrl_wants_stream, ctrl_wants_stream);
+                    
+                    // Update streaming state: enabled only if CTRL='1' AND notifications are enabled
+                    bool notif_enabled = atomic_load(&s_hcsr04_notifications_enabled);
+                    atomic_store(&s_hcsr04_streaming_enabled, ctrl_wants_stream && notif_enabled);
+                    
+                    ESP_LOGI(TAG, "HCSR04 CTRL: command=%c, ctrl_wants=%d, notif=%d, streaming=%d", 
+                             command, (int)ctrl_wants_stream, (int)notif_enabled, 
+                             (int)atomic_load(&s_hcsr04_streaming_enabled));
+                }
+
+                // Handle CCCD write: react-native-ble-plx automatically enables notifications when monitorCharacteristicForService is called
+                if (param->write.handle == s_char_hcsr04_cccd_handle && param->write.len >= 2) {
+                    // CCCD is little-endian: [0] = LSB, [1] = MSB
+                    const uint16_t cccd = (uint16_t)param->write.value[0] | ((uint16_t)param->write.value[1] << 8);
+                    const bool notif_enabled = (cccd & 0x0001) != 0; // Bit 0 = notifications enabled
+                    
+                    atomic_store(&s_hcsr04_notifications_enabled, notif_enabled);
+                    ESP_LOGI(TAG, "HCSR04 CCCD written: 0x%04X, notifications=%d", cccd, (int)notif_enabled);
+                    
+                    // Update streaming state: enabled only if CTRL='1' was written AND notifications are now enabled
+                    bool ctrl_wants_stream = atomic_load(&s_hcsr04_ctrl_wants_stream);
+                    atomic_store(&s_hcsr04_streaming_enabled, ctrl_wants_stream && notif_enabled);
+                    
+                    ESP_LOGI(TAG, "HCSR04 CCCD update: ctrl_wants=%d, notif=%d, streaming=%d",
+                             (int)ctrl_wants_stream, (int)notif_enabled,
+                             (int)atomic_load(&s_hcsr04_streaming_enabled));
+                }
             }
             break;
         }
         
         case ESP_GATTS_CONNECT_EVT:
             ESP_LOGI(TAG, "Połączono.");
+            s_is_connected = true;
+            s_gatts_if = gatts_if;
+            s_conn_id = param->connect.conn_id;
             break;
             
         case ESP_GATTS_DISCONNECT_EVT:
             ESP_LOGI(TAG, "Rozłączono. Wznawiam rozgłaszanie...");
+            s_is_connected = false;
+            s_gatts_if = ESP_GATT_IF_NONE;
+            atomic_store(&s_hcsr04_streaming_enabled, false);
+            atomic_store(&s_hcsr04_ctrl_wants_stream, false);
+            atomic_store(&s_hcsr04_notifications_enabled, false);
             esp_ble_gap_start_advertising(&adv_params); 
             break;
 
         default: break;
     }
+}
+
+bool ble_hcsr04_streaming_enabled(void)
+{
+    return atomic_load(&s_hcsr04_streaming_enabled);
+}
+
+void ble_hcsr04_set_streaming(bool enable)
+{
+    atomic_store(&s_hcsr04_streaming_enabled, enable);
+}
+
+int ble_hcsr04_notify_distance_cm(uint16_t distance_cm)
+{
+    if (!s_is_connected || s_gatts_if == ESP_GATT_IF_NONE || s_char_hcsr04_data_handle == 0)
+        return -1;
+
+    uint8_t payload[2] = {(uint8_t)(distance_cm & 0xFF), (uint8_t)((distance_cm >> 8) & 0xFF)};
+
+    // Send as notification (need_confirm=false)
+    esp_err_t err = esp_ble_gatts_send_indicate(s_gatts_if,
+                                               s_conn_id,
+                                               s_char_hcsr04_data_handle,
+                                               sizeof(payload),
+                                               payload,
+                                               false);
+    return (int)err;
 }

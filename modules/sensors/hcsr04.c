@@ -1,4 +1,5 @@
 #include "hcsr04.h"
+#include "ble_server.h"
 
 static gpio_num_t s_buzzer_pin = GPIO_NUM_NC;
 static _Atomic bool s_park_enabled = false;
@@ -155,6 +156,16 @@ void hcsr04_task(void *arg)
             success_count++;
 
             buzzer_set_distance((uint32_t)*shared_value);
+
+            // BLE streaming: send latest distance while the phone requested it.
+            if (ble_hcsr04_streaming_enabled())
+            {
+                // Saturate to uint16 range for BLE payload
+                uint32_t dist_cm_u32 = (uint32_t)*shared_value;
+                if (dist_cm_u32 > 0xFFFF)
+                    dist_cm_u32 = 0xFFFF;
+                ble_hcsr04_notify_distance_cm((uint16_t)dist_cm_u32);
+            }
 
             if (!fast_mode && success_count >= HCSR04_TRIGGER_COUNT)
             {
