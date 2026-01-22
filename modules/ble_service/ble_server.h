@@ -22,3 +22,7 @@ int ble_hcsr04_notify_distance_cm(uint16_t distance_cm);
 // Format: "SENSOR: message" (max 64 bytes total)
 // Returns ESP_OK if notification was queued, -1 if not connected/ready, -2 if notifications disabled.
 int ble_send_alert(const char* sensor_name, const char* message);
+
+bool ble_max6675_profile_requested(void);
+void ble_max6675_clear_profile_request(void);
+void ble_notify_max6675_profile(float temperature);

@@ -25,11 +25,17 @@ static uint16_t s_char_hcsr04_data_handle;
 static uint16_t s_char_hcsr04_cccd_handle;
 static uint16_t s_char_alert_handle;
 static uint16_t s_char_alert_cccd_handle;
+static uint16_t s_char_max6675_profile_ctrl_handle;
+static uint16_t s_char_max6675_profile_data_handle;
+static uint16_t s_char_max6675_profile_data_cccd_handle;
+
 
 static _Atomic bool s_hcsr04_streaming_enabled = false;
 static _Atomic bool s_hcsr04_ctrl_wants_stream = false; // Track CTRL='1' write (user wants streaming)
 static _Atomic bool s_hcsr04_notifications_enabled = false; // Track CCCD notification state
 static _Atomic bool s_alert_notifications_enabled = false; // Track alert CCCD notification state
+static _Atomic bool s_max6675_profile_requested = false;
+
 static bool s_is_connected = false;
 static esp_gatt_if_t s_gatts_if = ESP_GATT_IF_NONE;
 static uint16_t s_conn_id = 0;
@@ -46,6 +52,11 @@ typedef enum
     STAGE_HCSR04_DATA_CCCD_ADDED,
     STAGE_ALERT_DESC_ADDED,
     STAGE_ALERT_CCCD_ADDED,
+    STAGE_MAX6675_PROFILE_CTRL_DESC_ADDED,
+    STAGE_MAX6675_PROFILE_DATA_ADDED,
+    STAGE_MAX6675_PROFILE_DATA_CCCD_ADDED,
+
+
 } ble_gatt_build_stage_t;
 
 static ble_gatt_build_stage_t s_build_stage = STAGE_NONE;
@@ -188,6 +199,19 @@ void gatts_profile_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_t gatts
                 add_user_description(s_service_handle, "Sensor Alerts (notify)");
                 s_build_stage = STAGE_ALERT_DESC_ADDED;
             }
+            else if (added_uuid == CHAR_MAX6675_PROFILE_CTRL_UUID)
+            {
+                s_char_max6675_profile_ctrl_handle = param->add_char.attr_handle;
+                add_user_description(s_service_handle, "MAX6675 profile control (1=start)");
+                s_build_stage = STAGE_MAX6675_PROFILE_CTRL_DESC_ADDED;
+            }
+            else if (added_uuid == CHAR_MAX6675_PROFILE_DATA_UUID)
+            {
+                s_char_max6675_profile_data_handle = param->add_char.attr_handle;
+                add_user_description(s_service_handle, "MAX6675 profile temperature (float, notify)");
+                s_build_stage = STAGE_MAX6675_PROFILE_DATA_ADDED;
+            }
+
             break;
         }
 
@@ -198,13 +222,20 @@ void gatts_profile_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_t gatts
 
             if (descr_uuid == ESP_GATT_UUID_CHAR_CLIENT_CONFIG)
             {
-                // Determine which characteristic this CCCD belongs to based on build stage
-                if (s_build_stage == STAGE_HCSR04_DATA_DESC_ADDED) {
+                if (s_build_stage == STAGE_HCSR04_DATA_DESC_ADDED)
+                {
                     s_char_hcsr04_cccd_handle = descr_handle;
                     s_build_stage = STAGE_HCSR04_DATA_CCCD_ADDED;
-                } else if (s_build_stage == STAGE_ALERT_DESC_ADDED) {
+                }
+                else if (s_build_stage == STAGE_ALERT_DESC_ADDED)
+                {
                     s_char_alert_cccd_handle = descr_handle;
                     s_build_stage = STAGE_ALERT_CCCD_ADDED;
+                }
+                else if (s_build_stage == STAGE_MAX6675_PROFILE_DATA_ADDED)
+                {
+                    s_char_max6675_profile_data_cccd_handle = descr_handle;
+                    s_build_stage = STAGE_MAX6675_PROFILE_DATA_CCCD_ADDED;
                 }
             }
 
@@ -265,8 +296,42 @@ void gatts_profile_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_t gatts
             }
             else if (s_build_stage == STAGE_ALERT_CCCD_ADDED)
             {
+                esp_bt_uuid_t uuid = {
+                    .len = ESP_UUID_LEN_16,
+                    .uuid.uuid16 = CHAR_MAX6675_PROFILE_CTRL_UUID};
+
+                esp_ble_gatts_add_char(
+                    s_service_handle,
+                    &uuid,
+                    ESP_GATT_PERM_WRITE,
+                    ESP_GATT_CHAR_PROP_BIT_WRITE | ESP_GATT_CHAR_PROP_BIT_WRITE_NR,
+                    NULL,
+                    NULL);
+            }
+            else if (s_build_stage == STAGE_MAX6675_PROFILE_CTRL_DESC_ADDED)
+            {
+                esp_bt_uuid_t uuid = {
+                    .len = ESP_UUID_LEN_16,
+                    .uuid.uuid16 = CHAR_MAX6675_PROFILE_DATA_UUID};
+
+                esp_ble_gatts_add_char(
+                    s_service_handle,
+                    &uuid,
+                    ESP_GATT_PERM_READ,
+                    ESP_GATT_CHAR_PROP_BIT_NOTIFY | ESP_GATT_CHAR_PROP_BIT_READ,
+                    NULL,
+                    NULL);
+            }
+            else if (s_build_stage == STAGE_MAX6675_PROFILE_DATA_ADDED)
+            {
+                add_cccd(s_service_handle);
+            }
+
+            else if (s_build_stage == STAGE_MAX6675_PROFILE_DATA_CCCD_ADDED)
+            {
                 esp_ble_gatts_start_service(s_service_handle);
             }
+
             break;
         }
 
@@ -304,7 +369,19 @@ void gatts_profile_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_t gatts
                     ESP_LOGI(TAG, "Pass: %s", buffer);
                     save_wifi_cred_to_nvs("wifi_pass", buffer);
                 }
-                else if (param->write.handle == s_char_wifi_switch_handle) {
+                else if (param->write.handle == s_char_max6675_profile_ctrl_handle)
+                {
+                    char command = buffer[0];
+                    ESP_LOGI(TAG, "MAX6675 PROFILE ctrl: %c", command);
+
+                    if (command == '1')
+                    {
+                        atomic_store(&s_max6675_profile_requested, true);
+                    }
+                }
+
+                else if (param->write.handle == s_char_wifi_switch_handle)
+                {
                     // Sprawdzamy pierwszy znak: '1' lub '0'
                     char command = buffer[0];
                     ESP_LOGI(TAG, "Komenda Switch: %c", command);
@@ -495,4 +572,32 @@ int ble_send_alert(const char* sensor_name, const char* message)
                                                (uint8_t*)alert_msg,
                                                false);
     return (int)err;
+}
+
+bool ble_max6675_profile_requested(void)
+{
+    return atomic_load(&s_max6675_profile_requested);
+}
+
+void ble_max6675_clear_profile_request(void)
+{
+    atomic_store(&s_max6675_profile_requested, false);
+}
+
+void ble_notify_max6675_profile(float temperature)
+{
+    if (!s_is_connected || s_char_max6675_profile_data_handle == 0)
+        return;
+
+    uint8_t payload[4];
+    memcpy(payload, &temperature, sizeof(float));
+
+    esp_ble_gatts_send_indicate(
+        s_gatts_if,
+        s_conn_id,
+        s_char_max6675_profile_data_handle,
+        sizeof(payload),
+        payload,
+        false  // notification (not indication)
+    );
 }

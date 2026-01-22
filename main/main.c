@@ -183,10 +183,9 @@ void get_line_from_console(char *buffer, size_t max_len)
 
 void app_main(void)
 {
-  i2c_master_bus_handle_t i2c_bus_0 = i2c_initialize_master(I2C_PORT_0_SDA_PIN, I2C_PORT_0_SCL_PIN); // Use your PIN numbers
+  i2c_master_bus_handle_t i2c_bus_0 = i2c_initialize_master(I2C_PORT_0_SDA_PIN, I2C_PORT_0_SCL_PIN);
   i2c_master_bus_handle_t i2c_bus_1 = i2c_initialize_master(I2C_PORT_1_SDA_PIN, I2C_PORT_1_SCL_PIN);
   spi_initialize_master(SPI_MISO_PIN, SPI_MOSI_PIN, SPI_SCK_PIN);
- // Use your PIN numbers
   
   init_nvs();
   storage_init();
@@ -207,6 +206,7 @@ void app_main(void)
   max6675_start_task(&max6675_engine_temp);
   adxl345_start_task(&adxl345_acceleration);
   hcsr04_start_task(&hcsr04_distance);
+  max6675_start_profile_task(&max6675_engine_temp);
 
   mqtt_client_start();
 
